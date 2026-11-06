@@ -38,8 +38,11 @@ pnpm dev
 
 | 变量 | 作用 |
 |---|---|
-| `ANTHROPIC_API_KEY` | 打开两处 AI 功能。不设置时 AI 自动降级，其余功能照常 |
-| `LLM_MODEL` | 默认 `claude-haiku-5-5` |
+| `LLM_PROVIDER` | `anthropic`（默认）或 `openai`（OpenAI 及兼容协议：DeepSeek、通义千问、Ollama、vLLM 等） |
+| `LLM_MODEL` | 模型名；Anthropic 默认 `claude-haiku-5-5`，openai 协议必填 |
+| `LLM_API_KEY` | 通用 key，未设置时回退到 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`。不配置可用的模型时 AI 自动降级，其余功能照常 |
+| `LLM_BASE_URL` | 自定义地址：Anthropic 兼容网关，或 OpenAI 兼容服务（如 `http://localhost:11434/v1`，本地模型可以不填 key） |
+| `LLM_MAX_TOKENS_FIELD` / `LLM_STRICT_TOOLS` | 仅 openai 协议：OpenAI 新模型用 `max_completion_tokens`；兼容服务不认识 `strict` 时设为 `false` |
 | `DATABASE_URL` | 设置后改用 PostgreSQL（如 Neon），先运行 `pnpm db:migrate` |
 
 ## 演示路线（约 10 分钟）
@@ -64,14 +67,15 @@ node scripts/break-tests.mjs https://student-management-demo-six.vercel.app
 pnpm test
 ```
 
-一共 42 个测试，在内存 PGlite 上跑真实的迁移和约束：
+一共 51 个测试，在内存 PGlite 上跑真实的迁移和约束：
 
 | 文件 | 覆盖内容 |
 |---|---|
 | `tests/enrollment.test.ts` | 规则 1/2/3/4/6/15：老师冲突（数据库 EXCLUDE）、学生冲突、人数上限、余额、权限、转班、并发排班只成功一个 |
 | `tests/attendance.test.ts` | 规则 5/7/8/9/10/11：重复点名只扣一次、改点名写补偿流水、代课权限、点名时间窗、欠课上限、续费补扣、付款去重、退费金额、流水只追加 |
 | `tests/trials.test.ts` | 规则 12/13/14：每科一次、老师/学生冲突、代课不算冲突、时段人数、试听点名生成跟进待办、跟进结果、工作台 |
-| `tests/llm.test.ts` | 规则 16：AI 只拿到只读工具、违规方案被丢弃、确认时重新检查、各种失败降级；反馈只接受名单内学生 |
+| `tests/llm.test.ts` | 规则 16：AI 只拿到只读工具、违规方案被丢弃、确认时重新检查、各种失败降级、经 OpenAI 协议跑通；反馈只接受名单内学生 |
+| `tests/llm-adapters.test.ts` | Anthropic / OpenAI 两种格式的请求与响应转换、非法工具参数、错误处理、按环境变量选择协议 |
 | `tests/api.test.ts` | 通过 HTTP 层：401 / 403 / 越权修改 / 非法 JSON |
 | `tests/time.test.ts` | 跨夏令时课次时间不漂移 |
 
@@ -105,11 +109,13 @@ scripts/seed.ts               演示数据
 1. **AI 排班助手**（`src/server/llm/scheduling.ts`）：LLM 通过 4 个**只读**工具调用现有的规则函数，再用 `submit_proposals`（`strict` 工具）提交最多 2 个方案。服务端用 Zod 校验格式，并用最新数据重新检查每个班，不通过的丢弃。限制最多 6 轮、总共 30 秒。失败时退回候选列表。admin 确认后走 `POST /api/enrollments`，规则会再检查一次。
 2. **课后反馈整理**（`src/server/llm/feedback.ts`）：老师的随手反馈被整理成投入度、给家长的一句话和是否需要跟进。只接受名单里的学生；需要跟进的会生成顾问待办。点名先提交，AI 失败只标记"整理失败"并保留原文。
 
+**协议适配层**：业务代码只依赖 `src/server/llm/types.ts` 里与协议无关的消息格式（文本、工具调用、工具结果）。`anthropic.ts`（官方 SDK）和 `openai.ts`（`/v1/chat/completions`）负责与各自格式互相转换，比如 Anthropic 把工具结果放在 user 消息里，OpenAI 要求每个结果是单独的 `tool` 消息。切换协议只需要改环境变量，校验和降级逻辑不变。
+
 ## 部署
 
 已部署在 https://student-management-demo-six.vercel.app （Vercel 从 GitHub main 自动部署，数据库是通过 Vercel Storage 创建的 Neon）。
 
-1. 在 Vercel 导入仓库（`vercel.json` 已指定 Next.js 框架），在 Storage 里创建 Neon。这会自动设置 `DATABASE_URL`。可选再加 `ANTHROPIC_API_KEY`。
+1. 在 Vercel 导入仓库（`vercel.json` 已指定 Next.js 框架），在 Storage 里创建 Neon。这会自动设置 `DATABASE_URL`。如果要开启 AI，再按上面的表格加上 `LLM_*` 变量（或只加 `ANTHROPIC_API_KEY`）。
 2. 本地把同一个连接串写进 `.env.remote`（参考 `.env.remote.example`，已 git 忽略），然后运行下面的命令，会迁移并重新生成演示数据：
 
 ```bash
