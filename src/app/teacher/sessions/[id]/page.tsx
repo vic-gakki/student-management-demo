@@ -22,7 +22,7 @@ import { EmptyState, ErrorState, LoadingState } from '@/components/states';
 
 type Status = 'present' | 'late' | 'excused' | 'absent';
 interface Roster {
-  session: { id: number; startsAt: string; endsAt: string; status: string };
+  session: { id: number; startsAt: string; endsAt: string; status: string; note: string | null };
   cls: { name: string; subject: string };
   date: string;
   students: {
@@ -124,7 +124,7 @@ export default function RollCall({ params }: { params: Promise<{ id: string }> }
         <CardContent className="space-y-3">
           {r.session.status === 'cancelled' && (
             <Alert>
-              <AlertDescription>这节课已停课，不需要点名。</AlertDescription>
+              <AlertDescription>这节课已停课{r.session.note ? `（${r.session.note}）` : ''}，不需要点名，也不扣课时。</AlertDescription>
             </Alert>
           )}
           {notStarted && (

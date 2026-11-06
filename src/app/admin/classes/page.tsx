@@ -2,16 +2,19 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { CalendarDays } from 'lucide-react';
+import { CalendarDays, UserRoundX } from 'lucide-react';
 import { api } from '@/lib/api';
 import { WEEKDAY_LABELS } from '@/lib/time';
 import { SUBJECT_OPTIONS } from '@/lib/labels';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState, ErrorState, LoadingState } from '@/components/states';
+import { SessionsSheet } from './SessionsSheet';
+import { LeaveDialog } from './LeaveDialog';
 
 interface ClassRow {
   id: number;
@@ -36,6 +39,8 @@ const SUBJECT_COLOR: Record<string, string> = {
 /** 班级周视图：按星期几分列，一眼看到每个班的人数 */
 export default function ClassesPage() {
   const [subject, setSubject] = useState('all');
+  const [selected, setSelected] = useState<ClassRow | null>(null);
+  const [leaveOpen, setLeaveOpen] = useState(false);
   const q = useQuery({ queryKey: ['classes'], queryFn: () => api<ClassRow[]>('/api/classes') });
   const rows = (q.data ?? []).filter((c) => subject === 'all' || c.subject === subject);
 
@@ -43,10 +48,14 @@ export default function ClassesPage() {
     <>
       <PageHeader
         title="班级周视图"
-        description="每周固定开课的班级；颜色代表科目，满员的班级高亮"
+        description="每周固定开课的班级；点击班级可以逐节停课或安排代课"
         actions={
           <>
             {q.data && <span className="text-sm text-muted-foreground">共 {rows.length} 个班</span>}
+            <Button variant="outline" onClick={() => setLeaveOpen(true)}>
+              <UserRoundX data-icon="inline-start" />
+              老师请假
+            </Button>
             <Select value={subject} onValueChange={setSubject}>
               <SelectTrigger className="w-32">
                 <SelectValue />
@@ -89,7 +98,11 @@ export default function ClassesPage() {
                   return (
                     <Tooltip key={c.id}>
                       <TooltipTrigger asChild>
-                        <div className={cn('space-y-1.5 rounded-lg border border-l-4 bg-card p-2.5 text-xs shadow-xs', SUBJECT_COLOR[c.subject], full && 'bg-orange-50')}>
+                        <button
+                          type="button"
+                          onClick={() => setSelected(c)}
+                          className={cn('w-full space-y-1.5 rounded-lg border border-l-4 bg-card p-2.5 text-left text-xs shadow-xs transition hover:shadow-md', SUBJECT_COLOR[c.subject], full && 'bg-orange-50')}
+                        >
                           <div className="font-medium leading-tight">{c.name}</div>
                           <div className="text-muted-foreground tabular-nums">
                             {c.startTime}-{c.endTime}
@@ -102,7 +115,7 @@ export default function ClassesPage() {
                               {c.enrolled}/{c.capacity}
                             </span>
                           </div>
-                        </div>
+                        </button>
                       </TooltipTrigger>
                       <TooltipContent>
                         {c.teacherName} · {c.subject}
@@ -117,6 +130,8 @@ export default function ClassesPage() {
           })}
         </div>
       )}
+      <SessionsSheet cls={selected} onClose={() => setSelected(null)} />
+      <LeaveDialog open={leaveOpen} onOpenChange={setLeaveOpen} />
     </>
   );
 }

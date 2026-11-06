@@ -22,6 +22,7 @@ interface Item {
   endsAt: string;
   status: string;
   isSubstitute: boolean;
+  note: string | null;
   studentCount: number;
   newCount: number;
   markedCount: number;
@@ -93,7 +94,7 @@ export default function TeacherToday() {
                             </StatusBadge>
                           )}
                           {it.isSubstitute && <StatusBadge tone="blue">代课</StatusBadge>}
-                          {it.status === 'cancelled' && <StatusBadge tone="gray">已停课</StatusBadge>}
+                          {it.status === 'cancelled' && <StatusBadge tone="gray">已停课{it.note ? `：${it.note}` : ''}</StatusBadge>}
                         </div>
                         <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
                           <span className="inline-flex items-center gap-1">

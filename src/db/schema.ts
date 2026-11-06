@@ -112,6 +112,7 @@ export const classSessions = pgTable('class_sessions', {
   endsAt: tstz('ends_at').notNull(),
   status: text('status').$type<'scheduled' | 'cancelled' | 'done'>().notNull().default('scheduled'),
   substituteTeacherId: integer('substitute_teacher_id'),
+  note: text('note'),
 });
 
 export const enrollments = pgTable('enrollments', {
