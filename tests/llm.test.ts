@@ -1,12 +1,12 @@
 // AI 两处功能的测试：用脚本化的假 LLM，验证"只给建议 + 服务端校验 + 失败降级"。
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type Anthropic from '@anthropic-ai/sdk';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { DbHandle } from '@/db/client';
 import { attendance, followUpTasks, scheduleSuggestions } from '@/db/schema';
-import type { CreateParams, LlmClient } from '@/server/llm/client';
+import type { ChatRequest, ChatResponse, ContentBlock, LlmClient } from '@/server/llm/types';
 import { MAX_ROUNDS, requestScheduleSuggestion } from '@/server/llm/scheduling';
 import { processSessionFeedback } from '@/server/llm/feedback';
+import { createOpenAIClient } from '@/server/llm/openai';
 import { enrollStudent } from '@/server/services/enrollment';
 import { markAttendance } from '@/server/services/attendance';
 import { at, balanceOf, createTestDb, expectCode, makeClass, makeEnrollment, makeSession, makeStudent, makeUser, TUESDAY } from './helpers';
@@ -21,27 +21,19 @@ afterAll(async () => {
 
 const now = at(TUESDAY, '09:00');
 
-function message(content: unknown[]): Anthropic.Message {
-  return {
-    id: 'msg_test',
-    type: 'message',
-    role: 'assistant',
-    model: 'fake',
-    content,
-    stop_reason: 'tool_use',
-    stop_sequence: null,
-    usage: { input_tokens: 0, output_tokens: 0 },
-  } as unknown as Anthropic.Message;
+function message(content: ContentBlock[]): ChatResponse {
+  return { content, stopReason: 'tool_use' };
 }
-const toolUse = (id: string, name: string, input: unknown) => ({ type: 'tool_use', id, name, input });
+const toolUse = (id: string, name: string, input: unknown): ContentBlock => ({ type: 'tool_call', id, name, input });
 
-/** 按顺序返回预设回复，并记录每次请求 */
-function scripted(replies: ((p: CreateParams) => Anthropic.Message)[]): LlmClient & { calls: CreateParams[] } {
-  const calls: CreateParams[] = [];
+/** 按顺序返回预设回复，并记录每次请求（与协议无关，适配器另有测试） */
+function scripted(replies: ((p: ChatRequest) => ChatResponse)[]): LlmClient & { calls: ChatRequest[] } {
+  const calls: ChatRequest[] = [];
   return {
+    provider: 'anthropic',
     model: 'fake-model',
     calls,
-    async create(params) {
+    async chat(params) {
       calls.push(JSON.parse(JSON.stringify(params)));
       const next = replies[Math.min(calls.length - 1, replies.length - 1)];
       return next(params);
@@ -114,6 +106,41 @@ describe('AI 排班助手', () => {
     const [sug] = await h.db.select().from(scheduleSuggestions).where(eq(scheduleSuggestions.id, res.suggestionId));
     expect(sug.status).toBe('accepted');
     expect(sug.acceptedClassId).toBe(f.engSameDay.id);
+  });
+
+  it('切换到 OpenAI 协议：同一套排班逻辑经适配器跑通，工具结果以 tool 消息回传', async () => {
+    const f = await schedulingFixture();
+    const bodies: { messages: { role: string; content: string | null }[] }[] = [];
+    const replies = [
+      { finish_reason: 'tool_calls', message: { content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'list_class_options', arguments: '{"subject":"英语"}' } }] } },
+      {
+        finish_reason: 'tool_calls',
+        message: {
+          content: null,
+          tool_calls: [
+            {
+              id: 'c2',
+              type: 'function',
+              function: { name: 'submit_proposals', arguments: JSON.stringify({ summary: '周二同一天', proposals: [{ classId: f.engSameDay.id, reasons: ['和数学同一天'], unmetPreferences: [] }] }) },
+            },
+          ],
+        },
+      },
+    ];
+    const llm = createOpenAIClient({
+      model: 'any-openai-compatible-model',
+      baseURL: 'http://llm.local/v1',
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init!.body)));
+        return new Response(JSON.stringify({ choices: [replies[bodies.length - 1]] }), { status: 200 });
+      },
+    });
+    const res = await requestScheduleSuggestion(h.db, f.admin, { studentId: f.st.id, request: '最好和数学同一天', subject: '英语' }, llm, now);
+    expect(res.status).toBe('ready');
+    expect(res.proposals.map((p) => p.classId)).toEqual([f.engSameDay.id]);
+    const toolMsg = bodies[1].messages.find((m) => m.role === 'tool')!;
+    const options = JSON.parse(toolMsg.content!) as { classId: number; ok: boolean }[];
+    expect(options.find((o) => o.classId === f.engConflict.id)!.ok).toBe(false);
   });
 
   it('确认时重新检查全部规则：建议生成后班级满了就拒绝', async () => {

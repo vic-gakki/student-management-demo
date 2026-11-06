@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { Db } from '@/db/client';
 import { attendance, classSessions, classes, students } from '@/db/schema';
 import { createTaskOnce } from '../services/attendance';
-import { findToolUse, type LlmClient } from './client';
+import { findToolCall, type LlmClient, type ToolDef } from './types';
 
 export const FeedbackItem = z.object({
   studentId: z.number().int(),
@@ -18,12 +18,12 @@ export const FeedbackItem = z.object({
 export const FeedbackOutput = z.object({ students: z.array(FeedbackItem) });
 export type FeedbackItem = z.infer<typeof FeedbackItem>;
 
-const SUBMIT_TOOL = {
+const SUBMIT_TOOL: ToolDef = {
   name: 'submit_feedback',
   description: '提交整理后的每个学生的课后反馈。必须调用这个工具提交结果。',
   strict: true,
-  input_schema: {
-    type: 'object' as const,
+  inputSchema: {
+    type: 'object',
     additionalProperties: false,
     required: ['students'],
     properties: {
@@ -87,12 +87,11 @@ export async function processSessionFeedback(db: Db, sessionId: number, llm: Llm
   const input = rows.map((r) => ({ studentId: r.st.id, name: r.st.name, attendance: r.a.status, feedback: r.a.feedbackRaw }));
   let parsed: z.infer<typeof FeedbackOutput>;
   try {
-    const msg = await llm.create(
+    const msg = await llm.chat(
       {
-        max_tokens: 4000,
+        maxTokens: 4000,
         system: SYSTEM,
-        tools: [SUBMIT_TOOL as never],
-        tool_choice: { type: 'auto' },
+        tools: [SUBMIT_TOOL],
         messages: [
           {
             role: 'user',
@@ -102,7 +101,7 @@ export async function processSessionFeedback(db: Db, sessionId: number, llm: Llm
       },
       { timeoutMs: TIMEOUT_MS },
     );
-    const call = findToolUse(msg, 'submit_feedback');
+    const call = findToolCall(msg, 'submit_feedback');
     if (!call) return markFailed('AI 没有返回结构化结果');
     const result = FeedbackOutput.safeParse(call.input);
     if (!result.success) return markFailed('AI 返回的格式不正确');

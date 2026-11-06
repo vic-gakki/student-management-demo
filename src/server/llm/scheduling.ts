@@ -1,7 +1,7 @@
 // AI 排班助手。
 // 分工：硬性规则（冲突、人数、余额、权限）全部由现有代码判断；LLM 只负责理解要求、调用只读工具、按软性偏好排序。
 // LLM 没有任何写入工具；它的输出只是"建议"，admin 确认后走正常的 POST /api/enrollments，规则会再检查一次。
-import type Anthropic from '@anthropic-ai/sdk';
+
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '@/db/client';
@@ -11,7 +11,7 @@ import { DomainError } from '../errors';
 import { checkEnrollmentEligibility, listClassOptions, loadEligibilityContext, type ClassOption } from '../services/eligibility';
 import { findStudentsByName } from '../services/students';
 import { melbourneDate, WEEKDAY_LABELS, shortTime } from '@/lib/time';
-import type { LlmClient } from './client';
+import { toolCalls, type ChatMessage, type ContentBlock, type LlmClient, type ToolDef } from './types';
 
 export const MAX_ROUNDS = 6;
 export const TOTAL_BUDGET_MS = 30_000;
@@ -27,16 +27,16 @@ export const SubmitSchema = z.object({
   summary: z.string().max(500),
 });
 
-const READ_TOOLS: Anthropic.Tool[] = [
+const READ_TOOLS: ToolDef[] = [
   {
     name: 'get_student_profile',
     description: '查看当前学生的科目需求、登记的可用时间、在读班级和课时余额。',
-    input_schema: { type: 'object', properties: {}, additionalProperties: false },
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
     name: 'find_student',
     description: '按姓名查找其他学生以及他们在读的班级，用于"想和某同学一个班"这类要求。',
-    input_schema: {
+    inputSchema: {
       type: 'object',
       properties: { name: { type: 'string', description: '学生姓名或姓名的一部分' } },
       required: ['name'],
@@ -46,7 +46,7 @@ const READ_TOOLS: Anthropic.Tool[] = [
   {
     name: 'list_class_options',
     description: '列出候选班级。每个班都已由系统规则检查过：ok=false 表示不能报（原因见 reasons），warnings 是软性提示。',
-    input_schema: {
+    inputSchema: {
       type: 'object',
       properties: { subject: { type: 'string', description: '科目，例如 数学、英语；不传则列出全部科目' } },
       additionalProperties: false,
@@ -55,7 +55,7 @@ const READ_TOOLS: Anthropic.Tool[] = [
   {
     name: 'check_enrollment',
     description: '用系统规则验证把当前学生排进某个班是否可行。',
-    input_schema: {
+    inputSchema: {
       type: 'object',
       properties: { classId: { type: 'integer' } },
       required: ['classId'],
@@ -64,11 +64,11 @@ const READ_TOOLS: Anthropic.Tool[] = [
   },
 ];
 
-const SUBMIT_TOOL: Anthropic.Tool = {
+const SUBMIT_TOOL: ToolDef = {
   name: 'submit_proposals',
   description: `提交最多 ${MAX_PROPOSALS} 个排班方案（按推荐程度排序）。只能提交 list_class_options 或 check_enrollment 显示 ok=true 的班级。`,
   strict: true,
-  input_schema: {
+  inputSchema: {
     type: 'object',
     additionalProperties: false,
     required: ['proposals', 'summary'],
@@ -89,7 +89,7 @@ const SUBMIT_TOOL: Anthropic.Tool = {
       summary: { type: 'string', description: '一句话总结，中文' },
     },
   },
-} as Anthropic.Tool;
+};
 
 const SYSTEM = `你是教育机构的排班助手，帮课程顾问为一个学生挑选周班。
 工作方式：
@@ -221,7 +221,7 @@ export async function requestScheduleSuggestion(
   if (!llm) return save('failed', [], '', 'AI 建议暂不可用（未配置 AI）');
 
   const deadline = Date.now() + TOTAL_BUDGET_MS;
-  const messages: Anthropic.MessageParam[] = [
+  const messages: ChatMessage[] = [
     {
       role: 'user',
       content: `顾问的要求：${request}${input.subject ? `\n科目：${input.subject}` : ''}\n今天（墨尔本）：${today}`,
@@ -232,11 +232,8 @@ export async function requestScheduleSuggestion(
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) return save('failed', [], '', 'AI 建议超时');
-      const msg = await llm.create(
-        { max_tokens: 4000, system: SYSTEM, tools: [...READ_TOOLS, SUBMIT_TOOL], tool_choice: { type: 'auto' }, messages },
-        { timeoutMs: remaining },
-      );
-      const toolUses = msg.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
+      const msg = await llm.chat({ maxTokens: 4000, system: SYSTEM, tools: [...READ_TOOLS, SUBMIT_TOOL], messages }, { timeoutMs: remaining });
+      const toolUses = toolCalls(msg);
 
       const submit = toolUses.find((t) => t.name === 'submit_proposals');
       if (submit) {
@@ -251,13 +248,13 @@ export async function requestScheduleSuggestion(
       if (toolUses.length === 0) return save('failed', [], '', 'AI 没有给出方案');
 
       messages.push({ role: 'assistant', content: msg.content });
-      const results: Anthropic.ToolResultBlockParam[] = [];
+      const results: ContentBlock[] = [];
       for (const t of toolUses) {
         try {
           const out = await runTool(db, input.studentId, today, t.name, (t.input ?? {}) as Record<string, unknown>);
-          results.push({ type: 'tool_result', tool_use_id: t.id, content: JSON.stringify(out) });
+          results.push({ type: 'tool_result', toolCallId: t.id, content: JSON.stringify(out) });
         } catch (err) {
-          results.push({ type: 'tool_result', tool_use_id: t.id, content: err instanceof Error ? err.message : '工具执行失败', is_error: true });
+          results.push({ type: 'tool_result', toolCallId: t.id, content: err instanceof Error ? err.message : '工具执行失败', isError: true });
         }
       }
       messages.push({ role: 'user', content: results });
