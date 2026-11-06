@@ -3,7 +3,7 @@
 教育机构的学生管理系统：从**咨询、试听**开始，到**排班、点名扣课时、欠课、续费 / 退费**。
 设计思路、取舍、数据模型和业务规则见 **[DESIGN.md](DESIGN.md)**。
 
-- 技术栈：Next.js 15（App Router）+ React 19 + TypeScript、Drizzle ORM、PostgreSQL、Tailwind、TanStack Query、Zod、Vitest
+- 技术栈：Next.js 15（App Router）+ React 19 + TypeScript、Drizzle ORM、PostgreSQL、Tailwind + shadcn/ui（Radix）、TanStack Query、Zod、Vitest
 - 业务时间统一按 `Australia/Melbourne`
 - **线上地址：https://student-management-demo-six.vercel.app**（Vercel + Neon PostgreSQL，演示账号见下方）
 
