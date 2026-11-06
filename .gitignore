@@ -3,6 +3,8 @@ node_modules/
 .data/
 .env
 .env.local
+.env.remote
+.vercel
 *.tsbuildinfo
 next-env.d.ts
 coverage/
