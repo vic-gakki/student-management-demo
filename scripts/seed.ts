@@ -310,20 +310,19 @@ async function main() {
   await db.insert(s.enrollments).values(enrollRows);
 
   // ── 课时包、出勤与流水（在内存里按时间顺序模拟，保证余额 = 流水之和） ──
+  // 先在内存里算好所有行，再批量写入（远程数据库逐条插入要几千次往返）
   let payRef = 1000;
   const balances: { studentId: number; remainingHours: number; owedHours: number }[] = [];
+  const pkgValues: (typeof s.lessonPackages.$inferInsert)[] = [];
+  const attValues: (typeof s.attendance.$inferInsert)[] = [];
+  const attCharged: boolean[] = []; // 与 attValues 一一对应：是否需要写扣课流水
+  const owedTasks: (typeof s.followUpTasks.$inferInsert)[] = [];
   for (const p of plans) {
     const sid = idOf.get(p)!;
     let remaining = 0;
     let owed = 0;
-    let pkgId: number | null = null;
     if (p.hours > 0) {
-      const [pkg] = await db
-        .insert(s.lessonPackages)
-        .values({ studentId: sid, hours: p.hours, priceCents: p.hours * 4500, paymentMethod: pick(['转账', '刷卡']), paymentRef: `DEMO-${payRef++}`, purchasedAt: daysAgo(45), createdBy: p.owner.id })
-        .returning();
-      pkgId = pkg.id;
-      await db.insert(s.lessonLedger).values({ studentId: sid, packageId: pkg.id, delta: p.hours, reason: 'purchase', createdBy: p.owner.id, createdAt: daysAgo(45), note: `购买 ${p.hours} 节` });
+      pkgValues.push({ studentId: sid, hours: p.hours, priceCents: p.hours * 4500, paymentMethod: pick(['转账', '刷卡']), paymentRef: `DEMO-${payRef++}`, purchasedAt: daysAgo(45), createdBy: p.owner.id });
       remaining = p.hours;
     }
     // 过去的课次（今天之前）
@@ -342,22 +341,32 @@ async function main() {
       }
       const teacherId = cls.teacherId;
       const fb = chance(0.25) ? pick(['认真听讲，作业完成好', '这周有点走神', '进步明显，课堂积极', '计算粗心，需多练习', '状态不错']) : null;
-      const [a] = await db
-        .insert(s.attendance)
-        .values({ sessionId: se.id, studentId: sid, status, billing, feedbackRaw: fb, llmStatus: 'none', markedBy: teacherId, markedAt: se.endsAt })
-        .returning();
-      if (billing === 'charged') {
-        remaining--;
-        await db.insert(s.lessonLedger).values({ studentId: sid, packageId: pkgId, delta: -1, reason: 'attendance', attendanceId: a.id, createdBy: teacherId, createdAt: se.endsAt });
-      } else if (billing === 'owed') {
-        owed++;
-      }
+      attValues.push({ sessionId: se.id, studentId: sid, status, billing, feedbackRaw: fb, llmStatus: 'none', markedBy: teacherId, markedAt: se.endsAt });
+      attCharged.push(billing === 'charged');
+      if (billing === 'charged') remaining--;
+      else if (billing === 'owed') owed++;
     }
     if (owed > 0) {
-      await db.insert(s.followUpTasks).values({ studentId: sid, adminId: p.owner.id, type: 'owed_hours', note: '课时已用完，学生仍在上课（欠课），需尽快续费', dueAt: daysAgo(1), sourceRef: 'owed' });
+      owedTasks.push({ studentId: sid, adminId: p.owner.id, type: 'owed_hours', note: '课时已用完，学生仍在上课（欠课），需尽快续费', dueAt: daysAgo(1), sourceRef: 'owed' });
     }
     balances.push({ studentId: sid, remainingHours: remaining, owedHours: owed });
   }
+
+  const pkgRows = await db.insert(s.lessonPackages).values(pkgValues).returning();
+  const pkgOf = new Map(pkgRows.map((r) => [r.studentId, r]));
+  await db.insert(s.lessonLedger).values(
+    pkgRows.map((r) => ({ studentId: r.studentId, packageId: r.id, delta: r.hours, reason: 'purchase' as const, createdBy: r.createdBy, createdAt: r.purchasedAt, note: `购买 ${r.hours} 节` })),
+  );
+  const CHUNK = 400;
+  for (let i = 0; i < attValues.length; i += CHUNK) {
+    const chunk = attValues.slice(i, i + CHUNK);
+    const rows = await db.insert(s.attendance).values(chunk).returning({ id: s.attendance.id, studentId: s.attendance.studentId, markedBy: s.attendance.markedBy, markedAt: s.attendance.markedAt });
+    const ledger = rows
+      .filter((_, j) => attCharged[i + j])
+      .map((a) => ({ studentId: a.studentId, packageId: pkgOf.get(a.studentId)?.id ?? null, delta: -1, reason: 'attendance' as const, attendanceId: a.id, createdBy: a.markedBy, createdAt: a.markedAt }));
+    if (ledger.length) await db.insert(s.lessonLedger).values(ledger);
+  }
+  if (owedTasks.length) await db.insert(s.followUpTasks).values(owedTasks);
   // 刘洋 / 赵一 演示余额：直接按剩余 1 节 / 3 节调整（写调整流水，保证对账）
   for (const [p, target] of [[liuYang, 1], [zhaoYi, 3]] as const) {
     const b = balances.find((x) => x.studentId === idOf.get(p))!;
