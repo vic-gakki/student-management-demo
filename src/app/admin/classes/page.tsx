@@ -2,10 +2,16 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { CalendarDays } from 'lucide-react';
 import { api } from '@/lib/api';
 import { WEEKDAY_LABELS } from '@/lib/time';
 import { SUBJECT_OPTIONS } from '@/lib/labels';
-import { Card, Empty, ErrorBox, inputCls, Loading } from '@/components/app-ui';
+import { cn } from '@/lib/utils';
+import { Card, CardContent } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { PageHeader } from '@/components/page-header';
+import { EmptyState, ErrorState, LoadingState } from '@/components/states';
 
 interface ClassRow {
   id: number;
@@ -20,58 +26,97 @@ interface ClassRow {
   enrolled: number;
 }
 
+const SUBJECT_COLOR: Record<string, string> = {
+  数学: 'border-l-indigo-500',
+  英语: 'border-l-emerald-500',
+  物理: 'border-l-amber-500',
+  编程: 'border-l-sky-500',
+};
+
 /** 班级周视图：按星期几分列，一眼看到每个班的人数 */
 export default function ClassesPage() {
-  const [subject, setSubject] = useState('');
+  const [subject, setSubject] = useState('all');
   const q = useQuery({ queryKey: ['classes'], queryFn: () => api<ClassRow[]>('/api/classes') });
-  if (q.isPending) return <Loading />;
-  if (q.isError) return <ErrorBox error={q.error} onRetry={() => q.refetch()} />;
-  const rows = q.data.filter((c) => !subject || c.subject === subject);
+  const rows = (q.data ?? []).filter((c) => subject === 'all' || c.subject === subject);
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <h1 className="text-lg font-semibold">班级周视图</h1>
-        <select className={`${inputCls} w-32`} value={subject} onChange={(e) => setSubject(e.target.value)}>
-          <option value="">全部科目</option>
-          {SUBJECT_OPTIONS.map((s) => (
-            <option key={s}>{s}</option>
-          ))}
-        </select>
-        <span className="text-sm text-slate-500">共 {rows.length} 个班</span>
-      </div>
-      {rows.length === 0 ? (
+    <>
+      <PageHeader
+        title="班级周视图"
+        description="每周固定开课的班级；颜色代表科目，满员的班级高亮"
+        actions={
+          <>
+            {q.data && <span className="text-sm text-muted-foreground">共 {rows.length} 个班</span>}
+            <Select value={subject} onValueChange={setSubject}>
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部科目</SelectItem>
+                {SUBJECT_OPTIONS.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        }
+      />
+      {q.isPending ? (
+        <LoadingState rows={6} />
+      ) : q.isError ? (
+        <ErrorState error={q.error} onRetry={() => q.refetch()} />
+      ) : rows.length === 0 ? (
         <Card>
-          <Empty>没有符合条件的班级</Empty>
+          <CardContent>
+            <EmptyState title="没有符合条件的班级" icon={<CalendarDays />} />
+          </CardContent>
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-7">
-          {[1, 2, 3, 4, 5, 6, 7].map((wd) => (
-            <div key={wd}>
-              <div className="mb-2 text-center text-sm font-medium text-slate-600">{WEEKDAY_LABELS[wd]}</div>
-              <div className="space-y-2">
-                {rows
-                  .filter((c) => c.weekday === wd)
-                  .map((c) => {
-                    const full = c.enrolled >= c.capacity;
-                    return (
-                      <div key={c.id} className={`rounded border p-2 text-xs ${full ? 'border-orange-200 bg-orange-50' : 'border-slate-200 bg-white'}`}>
-                        <div className="font-medium text-slate-800">{c.name}</div>
-                        <div className="text-slate-500">
-                          {c.startTime}-{c.endTime}
+          {[1, 2, 3, 4, 5, 6, 7].map((wd) => {
+            const day = rows.filter((c) => c.weekday === wd);
+            return (
+              <div key={wd} className="space-y-2">
+                <div className="flex items-baseline justify-between px-1">
+                  <span className="text-sm font-medium">{WEEKDAY_LABELS[wd]}</span>
+                  <span className="text-xs text-muted-foreground">{day.length} 班</span>
+                </div>
+                {day.map((c) => {
+                  const full = c.enrolled >= c.capacity;
+                  const pct = Math.min(100, Math.round((c.enrolled / c.capacity) * 100));
+                  return (
+                    <Tooltip key={c.id}>
+                      <TooltipTrigger asChild>
+                        <div className={cn('space-y-1.5 rounded-lg border border-l-4 bg-card p-2.5 text-xs shadow-xs', SUBJECT_COLOR[c.subject], full && 'bg-orange-50')}>
+                          <div className="font-medium leading-tight">{c.name}</div>
+                          <div className="text-muted-foreground tabular-nums">
+                            {c.startTime}-{c.endTime}
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                              <div className={cn('h-full rounded-full', full ? 'bg-orange-500' : 'bg-primary/70')} style={{ width: `${pct}%` }} />
+                            </div>
+                            <span className={cn('tabular-nums', full ? 'font-medium text-orange-700' : 'text-muted-foreground')}>
+                              {c.enrolled}/{c.capacity}
+                            </span>
+                          </div>
                         </div>
-                        <div className="text-slate-500">{c.teacherName}</div>
-                        <div className={full ? 'font-medium text-orange-700' : 'text-slate-600'}>
-                          {c.enrolled}/{c.capacity}
-                          {full && ' 已满'}
-                        </div>
-                      </div>
-                    );
-                  })}
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {c.teacherName} · {c.subject}
+                        {c.level}
+                        {full ? ' · 已满' : ` · 还剩 ${c.capacity - c.enrolled} 个位置`}
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                })}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
-    </div>
+    </>
   );
 }
