@@ -5,7 +5,7 @@
 
 - 技术栈：Next.js 15（App Router）+ React 19 + TypeScript、Drizzle ORM、PostgreSQL、Tailwind、TanStack Query、Zod、Vitest
 - 业务时间统一按 `Australia/Melbourne`
-- 部署：尚未部署（见下方"部署"）
+- **线上地址：https://student-management-demo-six.vercel.app**（Vercel + Neon PostgreSQL，演示账号见下方）
 
 ## 快速开始
 
@@ -50,7 +50,13 @@ pnpm dev
 4. **李明 → 记录跟进结果**：选"考虑中"会生成新的跟进日期；选"报名"会打开录入课时包。
 5. **周舟 → 安排试听**：选一个已有时段，或新建时段（如果选的时间老师有课，会提示 `TEACHER_BUSY`）。
 6. **teacher1 登录 → 今日课程**：演示班里陈晨显示 🆕 新生，孙琪显示 ⚠️ 课时已用完。提交点名后，孙琪记为欠课，admin1 的工作台出现欠课待办。在 10:30 的试听里点名吴桐，admin1 收到 2 天内跟进的待办。
-7. **破坏测试**：用 [break-tests.http](break-tests.http) 绕过界面逐条打接口（VS Code REST Client）。
+7. **破坏测试**：用 [break-tests.http](break-tests.http) 绕过界面逐条打接口（VS Code REST Client），或者一次跑完：
+
+```bash
+node scripts/break-tests.mjs https://student-management-demo-six.vercel.app
+```
+
+破坏测试会改动数据（比如给张悦续费），跑完后要重新生成演示数据。
 
 ## 测试
 
@@ -101,12 +107,16 @@ scripts/seed.ts               演示数据
 
 ## 部署
 
-尚未部署。计划使用 Vercel + Neon：
+已部署在 https://student-management-demo-six.vercel.app （Vercel 从 GitHub main 自动部署，数据库是通过 Vercel Storage 创建的 Neon）。
 
-1. 在 Neon 创建数据库，本地执行 `DATABASE_URL=... pnpm db:seed`（会迁移并生成演示数据）。
-2. 在 Vercel 导入仓库，设置环境变量 `DATABASE_URL`，以及可选的 `ANTHROPIC_API_KEY`。
+1. 在 Vercel 导入仓库（`vercel.json` 已指定 Next.js 框架），在 Storage 里创建 Neon。这会自动设置 `DATABASE_URL`。可选再加 `ANTHROPIC_API_KEY`。
+2. 本地把同一个连接串写进 `.env.remote`（参考 `.env.remote.example`，已 git 忽略），然后运行下面的命令，会迁移并重新生成演示数据：
 
-PGlite 只用于本地和测试；Vercel 的文件系统不持久，部署必须设置 `DATABASE_URL`。
+```bash
+pnpm db:seed:remote
+```
+
+演示数据按生成当天的日期构造（"今日课程"、逾期待办等都依赖这一点），所以演示当天要再运行一次。PGlite 只用于本地和测试；Vercel 的文件系统不持久，部署必须设置 `DATABASE_URL`。
 
 ## AI 工具的使用
 
