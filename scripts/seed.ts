@@ -256,7 +256,9 @@ async function main() {
   }
 
   // 其余学生：每个 admin 补到约 30 人
-  const regularClasses = classRows.filter((c) => c.id !== demoToday.id && c.id !== engSat.id);
+  // 随机学生不进演示用的固定班，保证"冲突""已满"等演示效果稳定
+  const engA = classByName('英语基础A');
+  const regularClasses = classRows.filter((c) => ![demoToday.id, engSat.id, engA.id].includes(c.id));
   for (const admin of admins) {
     let count = plans.filter((p) => p.owner.id === admin.id).length;
     while (count < 30) {
