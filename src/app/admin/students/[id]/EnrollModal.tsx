@@ -4,23 +4,39 @@
 // 两处的"确认"都调用同一个 POST /api/enrollments，服务端会再检查一遍全部规则。
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Ban, Check, CircleCheck, Sparkles, TriangleAlert, X } from 'lucide-react';
+import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { WEEKDAY_LABELS } from '@/lib/time';
 import { SUBJECT_OPTIONS } from '@/lib/labels';
-import { Badge, Button, Empty, ErrorBox, inputCls, Loading, Modal } from '@/components/app-ui';
+import { cn } from '@/lib/utils';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import { Spinner } from '@/components/ui/spinner';
+import { StatusBadge } from '@/components/status';
+import { EmptyState, ErrorState, LoadingState } from '@/components/states';
 import type { ClassOption, StudentDetail, Suggestion } from './types';
+
+function classTime(o: Pick<ClassOption, 'weekday' | 'startTime' | 'endTime'>) {
+  return `${WEEKDAY_LABELS[o.weekday]} ${o.startTime}-${o.endTime}`;
+}
 
 export function EnrollModal({ student, open, onClose }: { student: StudentDetail; open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const defaultSubject = student.subjects.find((s) => s.status !== 'active' && s.status !== 'stopped')?.subject ?? student.subjects[0]?.subject ?? '数学';
   const [subject, setSubject] = useState(defaultSubject);
-  const [transferFrom, setTransferFrom] = useState<number | ''>('');
+  const [transferFrom, setTransferFrom] = useState('none');
   const [request, setRequest] = useState('');
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
+  const transferId = transferFrom === 'none' ? undefined : Number(transferFrom);
 
   const options = useQuery({
-    queryKey: ['class-options', student.id, subject, transferFrom],
-    queryFn: () => api<ClassOption[]>(`/api/students/${student.id}/class-options?subject=${encodeURIComponent(subject)}${transferFrom ? `&transferFrom=${transferFrom}` : ''}`),
+    queryKey: ['class-options', student.id, subject, transferId],
+    queryFn: () => api<ClassOption[]>(`/api/students/${student.id}/class-options?subject=${encodeURIComponent(subject)}${transferId ? `&transferFrom=${transferId}` : ''}`),
     enabled: open,
   });
 
@@ -31,8 +47,9 @@ export function EnrollModal({ student, open, onClose }: { student: StudentDetail
 
   const enroll = useMutation({
     mutationFn: (v: { classId: number; suggestionId?: number }) =>
-      api(`/api/enrollments`, { body: { studentId: student.id, classId: v.classId, suggestionId: v.suggestionId, transferFromClassId: transferFrom || undefined } }),
+      api(`/api/enrollments`, { body: { studentId: student.id, classId: v.classId, suggestionId: v.suggestionId, transferFromClassId: transferId } }),
     onSuccess: () => {
+      toast.success(transferId ? '已转班' : '已加入班级');
       qc.invalidateQueries({ queryKey: ['student', student.id] });
       qc.invalidateQueries({ queryKey: ['class-options'] });
       setSuggestion(null);
@@ -41,83 +58,106 @@ export function EnrollModal({ student, open, onClose }: { student: StudentDetail
   });
 
   const sameSubject = student.enrollments.filter((e) => e.subject === subject);
+  const okCount = options.data?.filter((o) => o.ok).length ?? 0;
 
   return (
-    <Modal open={open} title={`为 ${student.name} 加入班级`} onClose={onClose} wide>
-      <div className="space-y-4">
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>为 {student.name} 加入班级</DialogTitle>
+          <DialogDescription>冲突、人数、余额由系统规则判断；确认后才会写入。</DialogDescription>
+        </DialogHeader>
+
         <div className="flex flex-wrap items-center gap-3 text-sm">
-          <label className="flex items-center gap-2">
-            科目
-            <select className={`${inputCls} w-28`} value={subject} onChange={(e) => (setSubject(e.target.value), setSuggestion(null))}>
+          <span className="text-muted-foreground">科目</span>
+          <Select value={subject} onValueChange={(v) => (setSubject(v), setSuggestion(null), setTransferFrom('none'))}>
+            <SelectTrigger className="w-28">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
               {SUBJECT_OPTIONS.map((s) => (
-                <option key={s}>{s}</option>
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
               ))}
-            </select>
-          </label>
+            </SelectContent>
+          </Select>
           {sameSubject.length > 0 && (
-            <label className="flex items-center gap-2">
-              转班（从）
-              <select className={`${inputCls} w-48`} value={transferFrom} onChange={(e) => setTransferFrom(e.target.value ? Number(e.target.value) : '')}>
-                <option value="">不转班，新增</option>
-                {sameSubject.map((e) => (
-                  <option key={e.classId} value={e.classId}>
-                    {e.className} {WEEKDAY_LABELS[e.weekday]} {e.startTime}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <>
+              <span className="text-muted-foreground">转班（从）</span>
+              <Select value={transferFrom} onValueChange={setTransferFrom}>
+                <SelectTrigger className="w-56">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">不转班，新增</SelectItem>
+                  {sameSubject.map((e) => (
+                    <SelectItem key={e.classId} value={String(e.classId)}>
+                      {e.className} {classTime(e)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
           )}
         </div>
 
-        <section className="rounded-md border border-violet-200 bg-violet-50/50 p-3">
-          <div className="mb-2 text-sm font-medium text-violet-900">✨ AI 排班助手</div>
+        <section className="space-y-3 rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 to-indigo-50/40 p-4">
+          <div className="flex items-center gap-2 text-sm font-medium text-violet-900">
+            <Sparkles className="size-4" />
+            AI 排班助手
+          </div>
           <div className="flex gap-2">
-            <input
-              className={inputCls}
+            <Input
+              className="bg-background"
               placeholder="例如：避开周末，最好和数学同一天 / 最好和王小明一个班"
               value={request}
               onChange={(e) => setRequest(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && request.trim() && !ask.isPending && ask.mutate()}
             />
-            <Button onClick={() => ask.mutate()} disabled={!request.trim() || ask.isPending}>
+            <Button onClick={() => ask.mutate()} disabled={!request.trim() || ask.isPending} className="shrink-0">
+              {ask.isPending ? <Spinner data-icon="inline-start" /> : <Sparkles data-icon="inline-start" />}
               {ask.isPending ? '思考中…' : '问 AI'}
             </Button>
           </div>
-          <p className="mt-1 text-xs text-slate-500">AI 只给建议：冲突、人数、余额由系统规则判断，确认后才会写入。</p>
-          {ask.isPending && <Loading text="AI 正在查询学生信息和候选班级…" />}
-          {ask.isError && <ErrorBox error={ask.error} />}
+          {ask.isPending && <p className="text-xs text-violet-700">AI 正在查询学生信息和候选班级…</p>}
+          {ask.isError && <ErrorState error={ask.error} title="请求失败" />}
           {suggestion?.status === 'failed' && (
-            <div className="mt-2 rounded bg-yellow-50 px-3 py-2 text-sm text-yellow-800">
-              {suggestion.error ?? 'AI 建议暂不可用'}，请从下方候选列表手动选择。
-            </div>
+            <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+              <TriangleAlert />
+              <AlertDescription className="text-amber-800">{suggestion.error ?? 'AI 建议暂不可用'}，请从下方候选列表手动选择。</AlertDescription>
+            </Alert>
           )}
           {suggestion?.status === 'ready' && (
-            <div className="mt-3 space-y-2">
-              {suggestion.summary && <p className="text-sm text-slate-700">{suggestion.summary}</p>}
+            <div className="space-y-2">
+              {suggestion.summary && <p className="text-sm text-violet-900">{suggestion.summary}</p>}
               {suggestion.proposals.map((p, i) => (
-                <div key={p.classId} className="flex items-start justify-between gap-3 rounded border border-violet-200 bg-white p-2.5">
-                  <div className="text-sm">
-                    <div className="font-medium">
-                      {['①', '②'][i]} {p.option.name} · {WEEKDAY_LABELS[p.option.weekday]} {p.option.startTime}-{p.option.endTime}
-                      <span className="ml-2 text-xs text-slate-500">
+                <div key={p.classId} className="flex items-start justify-between gap-3 rounded-lg border bg-background p-3">
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex items-center gap-2 font-medium">
+                      <span className="flex size-5 items-center justify-center rounded-full bg-violet-600 text-xs text-white">{i + 1}</span>
+                      {p.option.name} · {classTime(p.option)}
+                      <span className="text-xs font-normal text-muted-foreground">
                         {p.option.teacherName} · {p.option.enrolled}/{p.option.capacity}
                       </span>
                     </div>
-                    <div className="mt-1 flex flex-wrap gap-1">
+                    <div className="flex flex-wrap gap-1">
                       {p.reasons.map((r) => (
-                        <Badge key={r} tone="green">
-                          ✓ {r}
-                        </Badge>
+                        <StatusBadge key={r} tone="green">
+                          <Check />
+                          {r}
+                        </StatusBadge>
                       ))}
                       {p.unmetPreferences.map((r) => (
-                        <Badge key={r} tone="orange">
-                          ✗ {r}
-                        </Badge>
+                        <StatusBadge key={r} tone="orange">
+                          <X />
+                          {r}
+                        </StatusBadge>
                       ))}
                       {p.option.warnings.map((w) => (
-                        <Badge key={w.code} tone="yellow">
+                        <StatusBadge key={w.code} tone="yellow">
                           {w.message}
-                        </Badge>
+                        </StatusBadge>
                       ))}
                     </div>
                   </div>
@@ -130,42 +170,56 @@ export function EnrollModal({ student, open, onClose }: { student: StudentDetail
           )}
         </section>
 
-        {enroll.isError && <ErrorBox error={enroll.error} />}
+        {enroll.isError && <ErrorState error={enroll.error} title="排班被拒绝" />}
 
-        <section>
-          <div className="mb-2 text-sm font-medium">全部候选（{subject}）</div>
+        <Separator />
+        <section className="space-y-2">
+          <div className="flex items-baseline justify-between">
+            <div className="text-sm font-medium">全部候选（{subject}）</div>
+            {options.data && (
+              <div className="text-xs text-muted-foreground">
+                可报 {okCount} / 共 {options.data.length}
+              </div>
+            )}
+          </div>
           {options.isPending ? (
-            <Loading />
+            <LoadingState rows={4} />
           ) : options.isError ? (
-            <ErrorBox error={options.error} onRetry={() => options.refetch()} />
+            <ErrorState error={options.error} onRetry={() => options.refetch()} />
           ) : options.data.length === 0 ? (
-            <Empty>这个科目暂时没有开放的班级</Empty>
+            <EmptyState title="这个科目暂时没有开放的班级" />
           ) : (
-            <ul className="divide-y divide-slate-100 rounded border border-slate-200">
+            <ul className="divide-y rounded-lg border">
               {options.data.map((o) => (
-                <li key={o.classId} className={`flex items-center justify-between gap-3 px-3 py-2 text-sm ${o.ok ? '' : 'bg-slate-50 text-slate-500'}`}>
-                  <div>
-                    <span className="mr-1">{o.ok ? '✅' : '⛔'}</span>
-                    <span className="font-medium">{o.name}</span> · {WEEKDAY_LABELS[o.weekday]} {o.startTime}-{o.endTime}
-                    <span className="ml-2 text-xs text-slate-500">
-                      {o.teacherName} · {o.enrolled}/{o.capacity} · 从 {o.startDate}
-                    </span>
-                    <div className="mt-0.5 flex flex-wrap gap-1">
-                      {o.reasons.map((r) => (
-                        <Badge key={r.message} tone="red">
-                          {r.message}
-                        </Badge>
-                      ))}
-                      {o.warnings.map((w) => (
-                        <Badge key={w.code} tone="yellow">
-                          {w.message}
-                        </Badge>
-                      ))}
+                <li key={o.classId} className={cn('flex items-center justify-between gap-3 px-3 py-2.5 text-sm', !o.ok && 'bg-muted/50')}>
+                  <div className="flex items-start gap-2">
+                    {o.ok ? <CircleCheck className="mt-0.5 size-4 text-emerald-600" /> : <Ban className="mt-0.5 size-4 text-muted-foreground" />}
+                    <div className={cn(!o.ok && 'text-muted-foreground')}>
+                      <div>
+                        <span className="font-medium">{o.name}</span> · {classTime(o)}
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          {o.teacherName} · {o.enrolled}/{o.capacity} · 从 {o.startDate}
+                        </span>
+                      </div>
+                      {(o.reasons.length > 0 || o.warnings.length > 0) && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {o.reasons.map((r) => (
+                            <StatusBadge key={r.message} tone="red">
+                              {r.message}
+                            </StatusBadge>
+                          ))}
+                          {o.warnings.map((w) => (
+                            <StatusBadge key={w.code} tone="yellow">
+                              {w.message}
+                            </StatusBadge>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                   {o.ok && (
-                    <Button size="sm" variant="secondary" disabled={enroll.isPending} onClick={() => enroll.mutate({ classId: o.classId })}>
-                      {transferFrom ? '转入' : '加入'}
+                    <Button size="sm" variant="outline" disabled={enroll.isPending} onClick={() => enroll.mutate({ classId: o.classId })}>
+                      {transferId ? '转入' : '加入'}
                     </Button>
                   )}
                 </li>
@@ -173,7 +227,7 @@ export function EnrollModal({ student, open, onClose }: { student: StudentDetail
             </ul>
           )}
         </section>
-      </div>
-    </Modal>
+      </DialogContent>
+    </Dialog>
   );
 }

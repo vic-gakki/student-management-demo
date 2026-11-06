@@ -4,14 +4,32 @@ import Link from 'next/link';
 import { use, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, BellRing, BookOpen, Check, Clock, CreditCard, Headphones, Lock, MessageSquareText, Pencil, Phone, Plus, ReceiptText, Trash2, Undo2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import { ATTENDANCE_STATUS, balanceBadge, LEDGER_REASON, STUDENT_STATUS, TASK_TYPE, TRIAL_OUTCOME, TRIAL_STATUS } from '@/lib/labels';
+import { ATTENDANCE_STATUS, LEDGER_REASON, TASK_TYPE, TRIAL_OUTCOME, TRIAL_STATUS } from '@/lib/labels';
 import { formatMelbourne, WEEKDAY_LABELS } from '@/lib/time';
-import { Badge, Button, Card, Empty, ErrorBox, inputCls, Loading } from '@/components/app-ui';
+import { cn } from '@/lib/utils';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { BalanceBadge, StatusBadge, StudentStatusBadge } from '@/components/status';
+import { EmptyState, ErrorState, LoadingState } from '@/components/states';
 import { EnrollModal } from './EnrollModal';
 import { BookTrialModal, OutcomeModal } from './TrialModals';
 import { PurchaseModal, RefundModal } from './MoneyModals';
 import type { StudentDetail } from './types';
+
+const SUBJECT_STATUS: Record<string, { label: string; tone: 'green' | 'gray' | 'blue' | 'purple' }> = {
+  inquiry: { label: '咨询中', tone: 'blue' },
+  trial: { label: '试听', tone: 'purple' },
+  active: { label: '在读', tone: 'green' },
+  stopped: { label: '已停', tone: 'gray' },
+};
 
 export default function StudentPage({ params }: { params: Promise<{ id: string }> }) {
   const id = Number(use(params).id);
@@ -27,214 +45,321 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
 
   const endEnrollment = useMutation({
     mutationFn: (enrollmentId: number) => api(`/api/enrollments/${enrollmentId}/end`, { body: {} }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['student', id] }),
+    onSuccess: () => {
+      toast.success('已退班，余额不变');
+      qc.invalidateQueries({ queryKey: ['student', id] });
+    },
+    onError: (e) => toast.error(e.message),
   });
   const doneTask = useMutation({
     mutationFn: (taskId: number) => api(`/api/tasks/${taskId}/done`, { method: 'POST' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['student', id] }),
+    onSuccess: () => {
+      toast.success('已标记完成');
+      qc.invalidateQueries({ queryKey: ['student', id] });
+    },
+    onError: (e) => toast.error(e.message),
   });
 
-  if (q.isPending) return <Loading />;
-  if (q.isError) return <ErrorBox error={q.error} onRetry={() => q.refetch()} />;
+  if (q.isPending) return <LoadingState rows={8} />;
+  if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const s = q.data;
-  const st = STUDENT_STATUS[s.status];
-  const bal = balanceBadge(s.balanceFlag, s.remainingHours, s.owedHours);
   const close = () => setModal(null);
+  const canEnroll = ['enrolled', 'paused'].includes(s.status);
 
   return (
-    <div className="space-y-4">
-      <div className="text-sm">
-        <Link href="/admin/students" className="text-slate-500 hover:underline">
-          ← 学生列表
+    <>
+      <Button variant="ghost" size="sm" className="-ml-2 w-fit" asChild>
+        <Link href="/admin/students">
+          <ArrowLeft data-icon="inline-start" />
+          学生列表
         </Link>
-      </div>
+      </Button>
 
       <Card>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-semibold">{s.name}</h1>
-              <span className="text-slate-500">{s.grade}</span>
-              <Badge tone={st?.tone}>{st?.label}</Badge>
-              <Badge tone={bal.tone}>{bal.label}</Badge>
+        <CardContent className="space-y-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <Avatar className="size-14">
+                <AvatarFallback className="bg-primary/10 text-lg text-primary">{s.name.slice(0, 1)}</AvatarFallback>
+              </Avatar>
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-2xl font-semibold tracking-tight">{s.name}</h1>
+                  <span className="text-muted-foreground">{s.grade}</span>
+                  <StudentStatusBadge status={s.status} />
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                  <span>负责人：{s.ownerName}</span>
+                  {s.guardians.map((g) => (
+                    <span key={g.id} className="inline-flex items-center gap-1">
+                      <Phone className="size-3.5" />
+                      {g.name}（{g.relation}）{g.phone}
+                    </span>
+                  ))}
+                </div>
+                {s.notes && <p className="text-sm text-muted-foreground">备注：{s.notes}</p>}
+                {s.lostReason && <p className="text-sm text-muted-foreground">流失原因：{s.lostReason}</p>}
+              </div>
             </div>
-            <p className="mt-1 text-sm text-slate-600">
-              负责人：{s.ownerName}
-              {s.guardians.map((g) => (
-                <span key={g.id} className="ml-4">
-                  家长：{g.name}（{g.relation}）{g.phone}
-                </span>
-              ))}
-            </p>
-            {s.notes && <p className="mt-1 text-sm text-slate-500">备注：{s.notes}</p>}
-            {s.lostReason && <p className="mt-1 text-sm text-slate-500">流失原因：{s.lostReason}</p>}
+            {s.canEdit ? (
+              <div className="flex gap-2">
+                <Button onClick={() => setModal('purchase')}>
+                  <CreditCard data-icon="inline-start" />
+                  录入续费
+                </Button>
+                <Button variant="destructive" disabled={s.remainingHours <= 0} onClick={() => setModal('refund')}>
+                  <Undo2 data-icon="inline-start" />
+                  退费
+                </Button>
+              </div>
+            ) : (
+              <StatusBadge tone="gray">
+                <Lock />
+                只读：只有负责人可以修改
+              </StatusBadge>
+            )}
           </div>
-          {s.canEdit ? (
-            <div className="flex gap-2">
-              <Button onClick={() => setModal('purchase')}>录入续费</Button>
-              <Button variant="danger" disabled={s.remainingHours <= 0} onClick={() => setModal('refund')}>
-                退费
-              </Button>
+          <Separator />
+          <div className="grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <div className="text-muted-foreground">剩余课时</div>
+              <div className={cn('text-2xl font-semibold tabular-nums', s.remainingHours <= 3 && 'text-orange-600', s.remainingHours === 0 && 'text-red-600')}>
+                {s.remainingHours}
+                <span className="ml-1 text-sm font-normal text-muted-foreground">节</span>
+              </div>
             </div>
-          ) : (
-            <Badge tone="gray">只读：只有负责人可以修改</Badge>
-          )}
-        </div>
+            <div>
+              <div className="text-muted-foreground">欠课</div>
+              <div className={cn('text-2xl font-semibold tabular-nums', s.owedHours > 0 && 'text-red-600')}>
+                {s.owedHours}
+                <span className="ml-1 text-sm font-normal text-muted-foreground">节</span>
+              </div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">课时状态</div>
+              <div className="pt-1.5">
+                <BalanceBadge flag={s.balanceFlag} remaining={s.remainingHours} owed={s.owedHours} />
+              </div>
+            </div>
+          </div>
+        </CardContent>
       </Card>
 
       {s.tasks.length > 0 && (
-        <Card title="待跟进">
-          <ul className="space-y-2">
-            {s.tasks.map((t) => (
-              <li key={t.id} className="flex items-center justify-between gap-2 text-sm">
-                <span>
-                  <Badge tone={new Date(t.dueAt) < new Date() ? 'red' : 'yellow'}>{TASK_TYPE[t.type]}</Badge> <span className="ml-1">{t.note}</span>
-                  <span className="ml-2 text-xs text-slate-400">截止 {formatMelbourne(new Date(t.dueAt))}</span>
-                </span>
-                {s.canEdit && (
-                  <Button size="sm" variant="ghost" onClick={() => doneTask.mutate(t.id)}>
-                    标记完成
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
+        <Card className="border-amber-200 bg-amber-50/50">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-amber-900">
+              <BellRing className="size-4" />
+              待跟进（{s.tasks.length}）
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="space-y-2">
+              {s.tasks.map((t) => {
+                const overdue = new Date(t.dueAt) < new Date();
+                return (
+                  <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <StatusBadge tone={overdue ? 'red' : 'yellow'}>{TASK_TYPE[t.type]}</StatusBadge>
+                      {t.note}
+                      <span className={cn('text-xs', overdue ? 'text-red-600' : 'text-muted-foreground')}>截止 {formatMelbourne(new Date(t.dueAt))}</span>
+                    </span>
+                    {s.canEdit && (
+                      <Button size="xs" variant="outline" onClick={() => doneTask.mutate(t.id)}>
+                        <Check data-icon="inline-start" />
+                        完成
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
         </Card>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card
-          title="科目与在读班级"
-          actions={
-            s.canEdit && (
-              <Button size="sm" onClick={() => setModal('enroll')}>
-                + 加入班级
-              </Button>
-            )
-          }
-        >
-          <div className="mb-3 flex flex-wrap gap-2 text-sm">
-            {s.subjects.map((sub) => (
-              <Badge key={sub.subject} tone={sub.status === 'active' ? 'green' : sub.status === 'stopped' ? 'gray' : 'blue'}>
-                {sub.subject} · {{ inquiry: '咨询中', trial: '试听', active: '在读', stopped: '已停' }[sub.status]}
-              </Badge>
-            ))}
-          </div>
-          {s.enrollments.length === 0 ? (
-            <Empty>还没有在读班级</Empty>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {s.enrollments.map((e) => (
-                <li key={e.id} className="flex items-center justify-between py-2 text-sm">
-                  <span>
-                    <span className="font-medium">{e.className}</span> · {WEEKDAY_LABELS[e.weekday]} {e.startTime}-{e.endTime}
-                    <span className="ml-2 text-xs text-slate-500">
-                      {e.teacherName} · 从 {e.startDate}
-                      {e.endDate && ` 到 ${e.endDate}`}
-                    </span>
-                  </span>
-                  {s.canEdit && !e.endDate && (
-                    <Button size="sm" variant="ghost" disabled={endEnrollment.isPending} onClick={() => confirm(`确认让 ${s.name} 退出 ${e.className}？余额不变。`) && endEnrollment.mutate(e.id)}>
-                      退班
-                    </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-          {endEnrollment.isError && <ErrorBox error={endEnrollment.error} />}
-          {!['enrolled', 'paused'].includes(s.status) && s.canEdit && <p className="mt-2 text-xs text-slate-500">购买课时包后才能排进正式班。</p>}
-        </Card>
-
-        <AvailabilityCard student={s} />
-      </div>
-
-      <Card
-        title="试听"
-        actions={
-          s.canEdit && (
-            <Button size="sm" variant="secondary" onClick={() => setModal('trial')}>
-              安排试听
-            </Button>
-          )
-        }
-      >
-        {s.trials.length === 0 ? (
-          <Empty>还没有试听记录</Empty>
-        ) : (
-          <ul className="divide-y divide-slate-100">
-            {s.trials.map((t) => (
-              <li key={t.id} className="flex items-center justify-between gap-2 py-2 text-sm">
-                <span>
-                  <span className="font-medium">{t.title}</span> · {formatMelbourne(new Date(t.startsAt))} · {t.teacherName}
-                  <span className="ml-2">
-                    <Badge tone={t.status === 'attended' ? 'green' : t.status === 'scheduled' ? 'blue' : 'gray'}>{TRIAL_STATUS[t.status]}</Badge>{' '}
-                    <Badge tone={t.outcome === 'pending' ? 'yellow' : t.outcome === 'lost' ? 'gray' : 'green'}>{TRIAL_OUTCOME[t.outcome]}</Badge>
-                  </span>
-                  {t.suggestedLevel && <span className="ml-2 text-xs text-slate-500">建议级别：{t.suggestedLevel}</span>}
-                  {t.feedback && <span className="ml-2 text-xs text-slate-500">反馈：{t.feedback}</span>}
-                </span>
-                {s.canEdit && t.status !== 'scheduled' && t.status !== 'cancelled' && t.outcome !== 'enrolled' && t.outcome !== 'lost' && (
-                  <Button size="sm" variant="ghost" onClick={() => (setOutcomeTrial(t.id), setModal('outcome'))}>
-                    记录跟进结果
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card title="最近课堂反馈">
-          {s.recentFeedback.length === 0 ? (
-            <Empty>暂无老师反馈</Empty>
-          ) : (
-            <ul className="space-y-2 text-sm">
-              {s.recentFeedback.map((f, i) => (
-                <li key={i}>
-                  <div className="text-xs text-slate-400">
-                    {formatMelbourne(new Date(f.startsAt))} · {f.className} · {ATTENDANCE_STATUS[f.status]}
-                  </div>
-                  {f.structured ? (
-                    <div>
-                      <Badge tone={f.structured.engagement === 'low' ? 'orange' : f.structured.engagement === 'high' ? 'green' : 'gray'}>
-                        投入度 {{ high: '高', ok: '一般', low: '低' }[f.structured.engagement]}
-                      </Badge>{' '}
-                      {f.structured.parentSummary}
-                    </div>
-                  ) : (
-                    <div className="text-slate-700">{f.raw}</div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
-        <Card title="课时流水">
-          {s.ledger.length === 0 ? (
-            <Empty>暂无流水</Empty>
-          ) : (
-            <table className="w-full text-sm">
-              <tbody className="divide-y divide-slate-100">
-                {s.ledger.map((l) => (
-                  <tr key={l.id}>
-                    <td className="py-1.5 text-xs text-slate-500">{formatMelbourne(new Date(l.createdAt))}</td>
-                    <td className="py-1.5">{LEDGER_REASON[l.reason]}</td>
-                    <td className={`py-1.5 text-right font-mono ${l.delta > 0 ? 'text-emerald-700' : 'text-slate-700'}`}>
-                      {l.delta > 0 ? `+${l.delta}` : l.delta}
-                    </td>
-                    <td className="py-1.5 pl-3 text-xs text-slate-500">
-                      {l.note}
-                      {l.amountCents !== null && ` · 退款 $${(l.amountCents / 100).toFixed(2)}`}
-                    </td>
-                  </tr>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="space-y-4 lg:col-span-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <BookOpen className="size-4 text-primary" />
+                科目与在读班级
+              </CardTitle>
+              <CardDescription className="flex flex-wrap gap-1 pt-1">
+                {s.subjects.map((sub) => (
+                  <StatusBadge key={sub.subject} tone={SUBJECT_STATUS[sub.status]?.tone}>
+                    {sub.subject} · {SUBJECT_STATUS[sub.status]?.label}
+                  </StatusBadge>
                 ))}
-              </tbody>
-            </table>
-          )}
-        </Card>
+              </CardDescription>
+              {s.canEdit && (
+                <CardAction>
+                  <Button size="sm" onClick={() => setModal('enroll')} disabled={!canEnroll}>
+                    <Plus data-icon="inline-start" />
+                    加入班级
+                  </Button>
+                </CardAction>
+              )}
+            </CardHeader>
+            <CardContent>
+              {!canEnroll && s.canEdit && <p className="mb-3 text-sm text-muted-foreground">购买课时包后才能排进正式班。</p>}
+              {s.enrollments.length === 0 ? (
+                <EmptyState title="还没有在读班级" />
+              ) : (
+                <ul className="divide-y rounded-lg border">
+                  {s.enrollments.map((e) => (
+                    <li key={e.id} className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
+                      <div>
+                        <div className="font-medium">
+                          {e.className} <span className="font-normal text-muted-foreground">· {WEEKDAY_LABELS[e.weekday]} {e.startTime}-{e.endTime}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {e.teacherName} · 从 {e.startDate}
+                          {e.endDate && ` 到 ${e.endDate}`}
+                        </div>
+                      </div>
+                      {s.canEdit && !e.endDate && (
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          disabled={endEnrollment.isPending}
+                          onClick={() => confirm(`确认让 ${s.name} 退出 ${e.className}？余额不变。`) && endEnrollment.mutate(e.id)}
+                        >
+                          退班
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Headphones className="size-4 text-violet-600" />
+                试听
+              </CardTitle>
+              <CardDescription>独立试听时段，每科固定内容</CardDescription>
+              {s.canEdit && (
+                <CardAction>
+                  <Button size="sm" variant="outline" onClick={() => setModal('trial')}>
+                    安排试听
+                  </Button>
+                </CardAction>
+              )}
+            </CardHeader>
+            <CardContent>
+              {s.trials.length === 0 ? (
+                <EmptyState title="还没有试听记录" icon={<Headphones />} />
+              ) : (
+                <ul className="divide-y rounded-lg border">
+                  {s.trials.map((t) => (
+                    <li key={t.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5 text-sm">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{t.title}</span>
+                          <StatusBadge tone={t.status === 'attended' ? 'green' : t.status === 'scheduled' ? 'blue' : 'gray'}>{TRIAL_STATUS[t.status]}</StatusBadge>
+                          <StatusBadge tone={t.outcome === 'pending' ? 'yellow' : t.outcome === 'lost' ? 'gray' : 'green'}>{TRIAL_OUTCOME[t.outcome]}</StatusBadge>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatMelbourne(new Date(t.startsAt))} · {t.teacherName}
+                          {t.suggestedLevel && ` · 建议级别：${t.suggestedLevel}`}
+                          {t.feedback && ` · 反馈：${t.feedback}`}
+                        </div>
+                      </div>
+                      {s.canEdit && t.status !== 'scheduled' && t.status !== 'cancelled' && t.outcome !== 'enrolled' && t.outcome !== 'lost' && (
+                        <Button size="xs" variant="outline" onClick={() => (setOutcomeTrial(t.id), setModal('outcome'))}>
+                          记录跟进结果
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ReceiptText className="size-4 text-primary" />
+                课时流水
+              </CardTitle>
+              <CardDescription>只追加不修改；改点名时写补偿流水</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {s.ledger.length === 0 ? (
+                <EmptyState title="暂无流水" />
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>时间</TableHead>
+                      <TableHead>类型</TableHead>
+                      <TableHead className="text-right">课时</TableHead>
+                      <TableHead>备注</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {s.ledger.map((l) => (
+                      <TableRow key={l.id}>
+                        <TableCell className="text-xs text-muted-foreground">{formatMelbourne(new Date(l.createdAt))}</TableCell>
+                        <TableCell>{LEDGER_REASON[l.reason]}</TableCell>
+                        <TableCell className={cn('text-right font-mono tabular-nums', l.delta > 0 ? 'text-emerald-700' : 'text-foreground')}>
+                          {l.delta > 0 ? `+${l.delta}` : l.delta}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {l.note}
+                          {l.amountCents !== null && ` · 退款 $${(l.amountCents / 100).toFixed(2)}`}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-4">
+          <AvailabilityCard student={s} />
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <MessageSquareText className="size-4 text-primary" />
+                最近课堂反馈
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {s.recentFeedback.length === 0 ? (
+                <EmptyState title="暂无老师反馈" icon={<MessageSquareText />} />
+              ) : (
+                <ul className="space-y-3 text-sm">
+                  {s.recentFeedback.map((f, i) => (
+                    <li key={i} className="space-y-1">
+                      <div className="text-xs text-muted-foreground">
+                        {formatMelbourne(new Date(f.startsAt))} · {f.className} · {ATTENDANCE_STATUS[f.status]}
+                      </div>
+                      {f.structured ? (
+                        <div className="space-y-1">
+                          <StatusBadge tone={f.structured.engagement === 'low' ? 'orange' : f.structured.engagement === 'high' ? 'green' : 'gray'}>
+                            投入度 {{ high: '高', ok: '一般', low: '低' }[f.structured.engagement]}
+                          </StatusBadge>
+                          <p>{f.structured.parentSummary}</p>
+                        </div>
+                      ) : (
+                        <p>{f.raw}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       {modal === 'enroll' && <EnrollModal student={s} open onClose={close} />}
@@ -242,7 +367,7 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
       <PurchaseModal student={s} open={modal === 'purchase'} onClose={close} />
       <RefundModal student={s} open={modal === 'refund'} onClose={close} />
       <OutcomeModal studentId={s.id} trialId={outcomeTrial} open={modal === 'outcome'} onClose={close} onEnrolled={() => setModal('purchase')} />
-    </div>
+    </>
   );
 }
 
@@ -253,81 +378,92 @@ function AvailabilityCard({ student }: { student: StudentDetail }) {
   const save = useMutation({
     mutationFn: () => api(`/api/students/${student.id}/availability`, { method: 'PUT', body: { slots } }),
     onSuccess: () => {
+      toast.success('可用时间已保存');
       qc.invalidateQueries({ queryKey: ['student', student.id] });
       setEditing(false);
     },
   });
+  const update = (i: number, patch: Partial<(typeof slots)[number]>) => setSlots(slots.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   return (
-    <Card
-      title="可用时间"
-      actions={
-        student.canEdit &&
-        !editing && (
-          <Button size="sm" variant="ghost" onClick={() => (setSlots(student.availability), setEditing(true))}>
-            编辑
-          </Button>
-        )
-      }
-    >
-      {!editing ? (
-        student.availability.length === 0 ? (
-          <Empty>未登记（排班时不做可用时间提示）</Empty>
-        ) : (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Clock className="size-4 text-primary" />
+          可用时间
+        </CardTitle>
+        <CardDescription>排班时只做提示，不硬性拦截</CardDescription>
+        {student.canEdit && !editing && (
+          <CardAction>
+            <Button size="xs" variant="ghost" onClick={() => (setSlots(student.availability), setEditing(true))}>
+              <Pencil data-icon="inline-start" />
+              编辑
+            </Button>
+          </CardAction>
+        )}
+      </CardHeader>
+      <CardContent>
+        {!editing ? (
           <div className="grid grid-cols-7 gap-1 text-center text-xs">
             {[1, 2, 3, 4, 5, 6, 7].map((wd) => {
               const hits = student.availability.filter((a) => a.weekday === wd);
               return (
-                <div key={wd}>
-                  <div className="mb-1 text-slate-500">{WEEKDAY_LABELS[wd]}</div>
+                <div key={wd} className="space-y-1">
+                  <div className="text-muted-foreground">{WEEKDAY_LABELS[wd].slice(1)}</div>
                   {hits.length ? (
                     hits.map((a, i) => (
-                      <div key={i} className="mb-1 rounded bg-sky-100 px-1 py-1 text-sky-800">
+                      <div key={i} className="rounded-md bg-primary/10 px-0.5 py-1.5 leading-tight text-primary">
                         {a.fromTime}
                         <br />
                         {a.toTime}
                       </div>
                     ))
                   ) : (
-                    <div className="rounded bg-slate-50 py-3 text-slate-300">—</div>
+                    <div className="rounded-md bg-muted py-3 text-muted-foreground/50">—</div>
                   )}
                 </div>
               );
             })}
           </div>
-        )
-      ) : (
-        <div className="space-y-2">
-          {slots.map((a, i) => (
-            <div key={i} className="flex items-center gap-2 text-sm">
-              <select className={`${inputCls} w-20`} value={a.weekday} onChange={(e) => setSlots(slots.map((x, j) => (j === i ? { ...x, weekday: Number(e.target.value) } : x)))}>
-                {[1, 2, 3, 4, 5, 6, 7].map((wd) => (
-                  <option key={wd} value={wd}>
-                    {WEEKDAY_LABELS[wd]}
-                  </option>
-                ))}
-              </select>
-              <input className={`${inputCls} w-28`} type="time" value={a.fromTime} onChange={(e) => setSlots(slots.map((x, j) => (j === i ? { ...x, fromTime: e.target.value } : x)))} />
-              –
-              <input className={`${inputCls} w-28`} type="time" value={a.toTime} onChange={(e) => setSlots(slots.map((x, j) => (j === i ? { ...x, toTime: e.target.value } : x)))} />
-              <Button size="sm" variant="ghost" onClick={() => setSlots(slots.filter((_, j) => j !== i))}>
-                删除
+        ) : (
+          <div className="space-y-2">
+            {slots.map((a, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <Select value={String(a.weekday)} onValueChange={(v) => update(i, { weekday: Number(v) })}>
+                  <SelectTrigger className="w-20">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[1, 2, 3, 4, 5, 6, 7].map((wd) => (
+                      <SelectItem key={wd} value={String(wd)}>
+                        {WEEKDAY_LABELS[wd]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input type="time" className="w-24" value={a.fromTime} onChange={(e) => update(i, { fromTime: e.target.value })} />
+                <span className="text-muted-foreground">–</span>
+                <Input type="time" className="w-24" value={a.toTime} onChange={(e) => update(i, { toTime: e.target.value })} />
+                <Button size="icon-sm" variant="ghost" aria-label="删除" onClick={() => setSlots(slots.filter((_, j) => j !== i))}>
+                  <Trash2 />
+                </Button>
+              </div>
+            ))}
+            <Button size="sm" variant="ghost" onClick={() => setSlots([...slots, { weekday: 1, fromTime: '16:00', toTime: '19:00' }])}>
+              <Plus data-icon="inline-start" />
+              添加时间段
+            </Button>
+            {save.isError && <ErrorState error={save.error} title="保存失败" />}
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
+                取消
+              </Button>
+              <Button size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
+                保存
               </Button>
             </div>
-          ))}
-          <Button size="sm" variant="ghost" onClick={() => setSlots([...slots, { weekday: 1, fromTime: '16:00', toTime: '19:00' }])}>
-            + 添加时间段
-          </Button>
-          {save.isError && <ErrorBox error={save.error} />}
-          <div className="flex justify-end gap-2">
-            <Button size="sm" variant="secondary" onClick={() => setEditing(false)}>
-              取消
-            </Button>
-            <Button size="sm" disabled={save.isPending} onClick={() => save.mutate()}>
-              保存
-            </Button>
           </div>
-        </div>
-      )}
+        )}
+      </CardContent>
     </Card>
   );
 }
