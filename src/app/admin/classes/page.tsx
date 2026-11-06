@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { WEEKDAY_LABELS } from '@/lib/time';
 import { SUBJECT_OPTIONS } from '@/lib/labels';
-import { Card, Empty, ErrorBox, inputCls, Loading } from '@/components/ui';
+import { Card, Empty, ErrorBox, inputCls, Loading } from '@/components/app-ui';
 
 interface ClassRow {
   id: number;

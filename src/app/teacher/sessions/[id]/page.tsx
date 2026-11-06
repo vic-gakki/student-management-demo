@@ -5,7 +5,7 @@ import { use, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { melbourneTime } from '@/lib/time';
-import { Badge, Button, Card, Empty, ErrorBox, inputCls, Loading } from '@/components/ui';
+import { Badge, Button, Card, Empty, ErrorBox, inputCls, Loading } from '@/components/app-ui';
 
 type Status = 'present' | 'late' | 'excused' | 'absent';
 interface Roster {

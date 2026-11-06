@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { api } from '@/lib/api';
-import { Button, ErrorBox, Field, inputCls } from '@/components/ui';
+import { Button, ErrorBox, Field, inputCls } from '@/components/app-ui';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('admin1@school.test');

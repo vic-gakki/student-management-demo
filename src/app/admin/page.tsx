@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { balanceBadge, TASK_TYPE } from '@/lib/labels';
 import { WEEKDAY_LABELS, formatMelbourne } from '@/lib/time';
-import { Badge, Button, Card, Empty, ErrorBox, Loading } from '@/components/ui';
+import { Badge, Button, Card, Empty, ErrorBox, Loading } from '@/components/app-ui';
 
 interface Dashboard {
   myStudentCount: number;

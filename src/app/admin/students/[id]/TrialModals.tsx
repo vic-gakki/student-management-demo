@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { formatMelbourne, melbourneDate, addDays } from '@/lib/time';
 import { SUBJECT_OPTIONS } from '@/lib/labels';
-import { Button, Empty, ErrorBox, Field, inputCls, Loading, Modal } from '@/components/ui';
+import { Button, Empty, ErrorBox, Field, inputCls, Loading, Modal } from '@/components/app-ui';
 import type { StudentDetail } from './types';
 
 interface Slot {

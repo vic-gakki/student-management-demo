@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { addDays, melbourneDate, melbourneTime, WEEKDAY_LABELS, isoWeekday } from '@/lib/time';
-import { Badge, Button, Card, Empty, ErrorBox, Loading } from '@/components/ui';
+import { Badge, Button, Card, Empty, ErrorBox, Loading } from '@/components/app-ui';
 
 interface Item {
   kind: 'class' | 'trial';

@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 export default async function TeacherLayout({ children }: { children: ReactNode }) {
   const actor = await requirePageRole('teacher');
   return (
-    <AppShell user={actor} nav={[{ href: '/teacher', label: '今日课程' }]}>
+    <AppShell user={actor} nav={[{ href: '/teacher', label: '今日课程', icon: 'today' }]}>
       {children}
     </AppShell>
   );

@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { ATTENDANCE_STATUS, balanceBadge, LEDGER_REASON, STUDENT_STATUS, TASK_TYPE, TRIAL_OUTCOME, TRIAL_STATUS } from '@/lib/labels';
 import { formatMelbourne, WEEKDAY_LABELS } from '@/lib/time';
-import { Badge, Button, Card, Empty, ErrorBox, inputCls, Loading } from '@/components/ui';
+import { Badge, Button, Card, Empty, ErrorBox, inputCls, Loading } from '@/components/app-ui';
 import { EnrollModal } from './EnrollModal';
 import { BookTrialModal, OutcomeModal } from './TrialModals';
 import { PurchaseModal, RefundModal } from './MoneyModals';

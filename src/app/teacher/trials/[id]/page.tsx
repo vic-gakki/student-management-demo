@@ -5,7 +5,7 @@ import { use, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { formatMelbourne } from '@/lib/time';
-import { Badge, Button, Card, Empty, ErrorBox, inputCls, Loading } from '@/components/ui';
+import { Badge, Button, Card, Empty, ErrorBox, inputCls, Loading } from '@/components/app-ui';
 
 interface TrialRoster {
   slot: { id: number; startsAt: string; endsAt: string };

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { Button, ErrorBox, Field, inputCls, Modal } from '@/components/ui';
+import { Button, ErrorBox, Field, inputCls, Modal } from '@/components/app-ui';
 import type { StudentDetail } from './types';
 
 export function PurchaseModal({ student, open, onClose }: { student: StudentDetail; open: boolean; onClose: () => void }) {

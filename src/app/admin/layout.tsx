@@ -10,9 +10,9 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     <AppShell
       user={actor}
       nav={[
-        { href: '/admin', label: '工作台' },
-        { href: '/admin/students', label: '学生' },
-        { href: '/admin/classes', label: '班级' },
+        { href: '/admin', label: '工作台', icon: 'dashboard' },
+        { href: '/admin/students', label: '学生', icon: 'students' },
+        { href: '/admin/classes', label: '班级周视图', icon: 'classes' },
       ]}
     >
       {children}

@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { WEEKDAY_LABELS } from '@/lib/time';
 import { SUBJECT_OPTIONS } from '@/lib/labels';
-import { Badge, Button, Empty, ErrorBox, inputCls, Loading, Modal } from '@/components/ui';
+import { Badge, Button, Empty, ErrorBox, inputCls, Loading, Modal } from '@/components/app-ui';
 import type { ClassOption, StudentDetail, Suggestion } from './types';
 
 export function EnrollModal({ student, open, onClose }: { student: StudentDetail; open: boolean; onClose: () => void }) {

@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { balanceBadge, STUDENT_STATUS, SUBJECT_OPTIONS } from '@/lib/labels';
-import { Badge, Button, Card, Empty, ErrorBox, Field, inputCls, Loading, Modal } from '@/components/ui';
+import { Badge, Button, Card, Empty, ErrorBox, Field, inputCls, Loading, Modal } from '@/components/app-ui';
 
 interface Row {
   id: number;
