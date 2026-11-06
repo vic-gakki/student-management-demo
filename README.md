@@ -127,6 +127,12 @@ scripts/seed.ts               演示数据
 pnpm db:seed:remote
 ```
 
+数据库结构有更新（新增迁移文件）时，推送部署前先只迁移、不清空数据：
+
+```bash
+pnpm db:migrate:remote
+```
+
 演示数据按生成当天的日期构造（"今日课程"、逾期待办等都依赖这一点），所以演示当天要再运行一次。PGlite 只用于本地和测试；Vercel 的文件系统不持久，部署必须设置 `DATABASE_URL`。
 
 ## AI 工具的使用
