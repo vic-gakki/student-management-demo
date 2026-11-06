@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
-import { CalendarDays, ChevronsUpDown, GraduationCap, LayoutDashboard, LogOut, Users, type LucideIcon } from 'lucide-react';
+import { CalendarClock, CalendarDays, CalendarRange, ChevronsUpDown, GraduationCap, Headphones, LayoutDashboard, LogOut, Users, type LucideIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -25,7 +25,14 @@ import {
   SidebarTrigger,
 } from '@/components/ui/sidebar';
 
-const ICONS: Record<string, LucideIcon> = { dashboard: LayoutDashboard, students: Users, classes: CalendarDays, today: CalendarDays };
+const ICONS: Record<string, LucideIcon> = {
+  dashboard: LayoutDashboard,
+  students: Users,
+  classes: CalendarDays,
+  trials: Headphones,
+  today: CalendarClock,
+  week: CalendarRange,
+};
 
 export interface NavItem {
   href: string;

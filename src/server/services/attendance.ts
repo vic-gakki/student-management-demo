@@ -18,8 +18,9 @@ import {
 } from '@/db/schema';
 import { requireRole, type Actor } from '../actor';
 import { DomainError, withDbErrors } from '../errors';
-import { addDays, melbourneDate, melbourneDateTime } from '@/lib/time';
+import { addDays, melbourneDate, melbourneDateTime, weekStart } from '@/lib/time';
 import { balanceFlag, lockBalance, OWED_LIMIT } from './ledger';
+import { ensureSessions } from './sessions';
 
 export const MARK_WINDOW_DAYS = 7;
 const CHARGEABLE: ReadonlySet<AttendanceStatus> = new Set(['present', 'late', 'absent']);
@@ -249,9 +250,28 @@ export async function markAttendance(db: Db, actor: Actor, sessionId: number, en
 
 /** 老师的"今日课程"：正式课（含代课）+ 试听时段 */
 export async function getTeacherDay(db: Db, actor: Actor, date: string) {
+  return getTeacherRange(db, actor, date, date);
+}
+
+/** 老师的周课表：从 weekStartDate（周一）起 7 天，按天分组 */
+export async function getTeacherWeek(db: Db, actor: Actor, anyDate: string) {
+  const start = weekStart(anyDate);
+  const items = await getTeacherRange(db, actor, start, addDays(start, 6));
+  return {
+    weekStart: start,
+    days: Array.from({ length: 7 }, (_, i) => {
+      const date = addDays(start, i);
+      return { date, items: items.filter((it) => it.date === date) };
+    }),
+  };
+}
+
+async function getTeacherRange(db: Db, actor: Actor, fromDate: string, toDate: string) {
   requireRole(actor, 'teacher');
-  const from = melbourneDateTime(date, '00:00');
-  const to = melbourneDateTime(addDays(date, 1), '00:00');
+  // 先按班级规则补齐这段时间的课次，再查询
+  await ensureSessions(db, fromDate, toDate);
+  const from = melbourneDateTime(fromDate, '00:00');
+  const to = melbourneDateTime(addDays(toDate, 1), '00:00');
 
   const sessions = await db
     .select({ s: classSessions, c: classes })
@@ -274,6 +294,7 @@ export async function getTeacherDay(db: Db, actor: Actor, date: string) {
     items.push({
       kind: 'class' as const,
       id: s.id,
+      date: melbourneDate(s.startsAt),
       title: c.name,
       subject: c.subject,
       startsAt: s.startsAt,
@@ -299,6 +320,7 @@ export async function getTeacherDay(db: Db, actor: Actor, date: string) {
     items.push({
       kind: 'trial' as const,
       id: slot.id,
+      date: melbourneDate(slot.startsAt),
       title: `试听 · ${t.title}`,
       subject: t.subject,
       startsAt: slot.startsAt,
