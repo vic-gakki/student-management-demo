@@ -1,0 +1,109 @@
+### 破坏测试：绕过界面直接调接口，验证规则都在服务端执行
+### 用法：VS Code 安装 REST Client 插件后逐条点 "Send Request"（会自动保存 cookie）
+### 前提：pnpm db:seed && pnpm dev；密码见 scripts/seed.ts 的 DEMO_PASSWORD
+### 学生 id 1 = 张悦（负责人 admin1）
+
+@base = http://localhost:3000
+
+### 0. 未登录直接访问 → 401 UNAUTHENTICATED
+GET {{base}}/api/dashboard
+
+### 1. 以 admin2 登录（不是张悦的负责人）
+POST {{base}}/api/auth/login
+content-type: application/json
+
+{ "email": "admin2@school.test", "password": "demo1234" }
+
+### 2. admin2 能看张悦（所有 admin 可看）→ 200，canEdit=false
+GET {{base}}/api/students/1
+
+### 3. admin2 给张悦排班 → 403 FORBIDDEN（规则 6）
+POST {{base}}/api/enrollments
+content-type: application/json
+
+{ "studentId": 1, "classId": 3 }
+
+### 4. admin2 给张悦录入续费 → 403 FORBIDDEN
+POST {{base}}/api/students/1/packages
+content-type: application/json
+
+{ "hours": 100, "priceCents": 0, "paymentMethod": "现金", "paymentRef": "HACK-1" }
+
+### 5. admin2 替张悦请求 AI 排班建议 → 403 FORBIDDEN（规则 16）
+POST {{base}}/api/students/1/schedule-suggestions
+content-type: application/json
+
+{ "request": "随便排" }
+
+### ───── 以下以负责人 admin1 登录 ─────
+POST {{base}}/api/auth/login
+content-type: application/json
+
+{ "email": "admin1@school.test", "password": "demo1234" }
+
+### 6. 张悦余额为 0 时排新班 → 409 INSUFFICIENT_HOURS（规则 4；先续费再试下一条）
+POST {{base}}/api/enrollments
+content-type: application/json
+
+{ "studentId": 1, "classId": 3 }
+
+### 7. 录入续费（会先补扣 1 节欠课）→ 200, settledOwed=1
+POST {{base}}/api/students/1/packages
+content-type: application/json
+
+{ "hours": 20, "priceCents": 90000, "paymentMethod": "转账", "paymentRef": "BREAK-001" }
+
+### 8. 同一付款凭证号再录一次 → 409 DUPLICATE_PAYMENT（规则 10）
+POST {{base}}/api/students/1/packages
+content-type: application/json
+
+{ "hours": 20, "priceCents": 90000, "paymentMethod": "转账", "paymentRef": "BREAK-001" }
+
+### 9. 排进和数学提高（周二 16:00）冲突的英语基础A → 409 SCHEDULE_CONFLICT（规则 2）
+###    classId 4 = 英语基础A（周二 16:00）
+POST {{base}}/api/enrollments
+content-type: application/json
+
+{ "studentId": 1, "classId": 4 }
+
+### 10. 排进已满的英语提高（周六）→ 409 CLASS_FULL（规则 3）；classId 5 = 英语提高
+POST {{base}}/api/enrollments
+content-type: application/json
+
+{ "studentId": 1, "classId": 5 }
+
+### 11. 开始日期设在过去 → 400 INVALID_DATE
+POST {{base}}/api/enrollments
+content-type: application/json
+
+{ "studentId": 1, "classId": 3, "startDate": "2020-01-01" }
+
+### 12. 咨询中的学生（周舟，id 8）直接排正式班 → 409 NOT_ENROLLED（规则 15）
+POST {{base}}/api/enrollments
+content-type: application/json
+
+{ "studentId": 8, "classId": 3 }
+
+### 13. 字段类型错误 → 400 VALIDATION
+POST {{base}}/api/enrollments
+content-type: application/json
+
+{ "studentId": "1; DROP TABLE students", "classId": 3 }
+
+### ───── 老师 ─────
+POST {{base}}/api/auth/login
+content-type: application/json
+
+{ "email": "teacher2@school.test", "password": "demo1234" }
+
+### 14. teacher2 访问 admin 接口 → 403
+GET {{base}}/api/dashboard
+
+### 15. teacher2 给 teacher1 的今日演示班点名 → 403 FORBIDDEN（规则 7）
+###     先用 teacher1 登录 GET /api/teacher/today 拿到课次 id，替换下面的 5
+POST {{base}}/api/sessions/5/attendance
+content-type: application/json
+
+{ "entries": [{ "studentId": 5, "status": "present" }] }
+
+### 16. 给未来的课点名 → 409 TOO_EARLY（规则 8）：用 teacher1 登录后，对 GET /api/teacher/today?date=<下周> 里的课次提交
