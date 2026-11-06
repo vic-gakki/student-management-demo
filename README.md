@@ -52,7 +52,8 @@ pnpm dev
 3. **加入班级 → 英语**：英语基础A 显示"与数学提高时间冲突"，英语提高（周六）显示"已满"，其余班如果不在可用时间内会给出提示。在 AI 排班助手里输入"避开周末，最好和数学同一天"或"最好和王小明一个班"，AI 给出最多 2 个方案和理由，确认后走正常排班接口。
 4. **李明 → 记录跟进结果**：选"考虑中"会生成新的跟进日期；选"报名"会打开录入课时包。
 5. **周舟 → 安排试听**：选一个已有时段，或新建时段（如果选的时间老师有课，会提示 `TEACHER_BUSY`）。
-6. **teacher1 登录 → 今日课程**：演示班里陈晨显示 🆕 新生，孙琪显示 ⚠️ 课时已用完。提交点名后，孙琪记为欠课，admin1 的工作台出现欠课待办。在 10:30 的试听里点名吴桐，admin1 收到 2 天内跟进的待办。
+5b. **班级周视图 → 点击任意班级**：逐节停课（不扣课时）或指定代课老师；代课老师那个时间有课会提示 `TEACHER_BUSY`。顶部"老师请假"可以把一段时间的课批量代课或停课，有冲突的那节会单独列出来。**试听安排**页面集中查看两周内的试听时段和已约学生。
+6. **teacher1 登录 → 今日课程 / 我的周课表**：演示班里陈晨显示 🆕 新生，孙琪显示 ⚠️ 课时已用完。提交点名后，孙琪记为欠课，admin1 的工作台出现欠课待办。在 10:30 的试听里点名吴桐，admin1 收到 2 天内跟进的待办。
 7. **破坏测试**：用 [break-tests.http](break-tests.http) 绕过界面逐条打接口（VS Code REST Client），或者一次跑完：
 
 ```bash
@@ -67,7 +68,7 @@ node scripts/break-tests.mjs https://student-management-demo-six.vercel.app
 pnpm test
 ```
 
-一共 51 个测试，在内存 PGlite 上跑真实的迁移和约束：
+一共 63 个测试，在内存 PGlite 上跑真实的迁移和约束：
 
 | 文件 | 覆盖内容 |
 |---|---|
@@ -77,6 +78,8 @@ pnpm test
 | `tests/llm.test.ts` | 规则 16：AI 只拿到只读工具、违规方案被丢弃、确认时重新检查、各种失败降级、经 OpenAI 协议跑通；反馈只接受名单内学生 |
 | `tests/llm-adapters.test.ts` | Anthropic / OpenAI 两种格式的请求与响应转换、非法工具参数、错误处理、按环境变量选择协议 |
 | `tests/api.test.ts` | 通过 HTTP 层：401 / 403 / 越权修改 / 非法 JSON |
+| `tests/sessions.test.ts` | 规则 17/18：按需生成课次（范围、幂等、不覆盖调整、夏令时）、远期周课表、停课 / 恢复 / 代课、老师请假批量处理 |
+| `tests/students.test.ts` | 学生列表分页、在读班级、搜索转义 |
 | `tests/time.test.ts` | 跨夏令时课次时间不漂移 |
 
 ```bash
@@ -93,7 +96,9 @@ src/server/services/          业务规则（唯一实现处）
   enrollment.ts               排班事务（锁学生行 + 班级行）、退班、转班
   attendance.ts               点名扣课时、欠课、补偿流水、今日课程
   ledger.ts                   续费（补扣欠课）、退费
-  trials.ts                   试听时段、安排试听、试听点名、跟进结果
+  trials.ts                   试听时段、安排试听、试听点名、跟进结果、试听安排
+  sessions.ts                 按需生成课次
+  session-admin.ts            停课、恢复、代课、老师请假
   students.ts / dashboard.ts  咨询登记、学生详情、工作台
 src/server/llm/               AI 排班助手（tool use）、课后反馈整理（结构化输出）
 src/server/http.ts            Route Handler 包装：会话 → 角色 → 服务 → 错误映射
