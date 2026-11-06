@@ -411,13 +411,25 @@ async function main() {
 
   // 其他试听状态的学生给一条已安排的试听，避免出现在"未安排试听"里
   const otherTrials = plans.filter((p) => p.status === 'trial' && p !== liMing && p !== wuTong);
-  const slotRows = await db.select().from(s.trialSlots).where(sql`${s.trialSlots.startsAt} > now()`);
+  // seed 直接写库、绕过了服务层，所以这里要自己遵守人数上限：按剩余名额分配，没有名额的退回"咨询中"
+  const slotRows = await db.select().from(s.trialSlots).where(sql`${s.trialSlots.startsAt} > now()`).orderBy(s.trialSlots.startsAt);
+  const booked = new Map<number, number>();
   for (const p of otherTrials) {
     const sub = p.subjects[0].subject;
-    const slot = slotRows.find((x) => x.templateId === tplBy.get(sub)!.id);
-    if (!slot) continue;
+    const slot = slotRows.find((x) => x.templateId === tplBy.get(sub)!.id && (booked.get(x.id) ?? 0) < x.capacity);
+    if (!slot) {
+      await db.update(s.students).set({ status: 'lead' }).where(sql`${s.students.id} = ${idOf.get(p)!}`);
+      continue;
+    }
+    booked.set(slot.id, (booked.get(slot.id) ?? 0) + 1);
     await db.insert(s.trialLessons).values({ studentId: idOf.get(p)!, slotId: slot.id, subject: sub, createdBy: p.owner.id });
   }
+
+  // 校验：没有超员的试听时段
+  const over = (await db.execute(
+    sql`SELECT ts.id FROM trial_slots ts JOIN trial_lessons tl ON tl.slot_id = ts.id AND tl.status <> 'cancelled' GROUP BY ts.id, ts.capacity HAVING count(*) > ts.capacity`,
+  )) as unknown as { rows: unknown[] };
+  if (over.rows.length) throw new Error(`校验失败：${over.rows.length} 个试听时段超员`);
 
   // 对账：余额必须等于流水之和
   const mismatch = (await db.execute(
