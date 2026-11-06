@@ -39,9 +39,19 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
   const [modal, setModal] = useState<null | 'enroll' | 'trial' | 'purchase' | 'refund' | 'outcome'>(null);
   const [outcomeTrial, setOutcomeTrial] = useState<number | null>(null);
 
+  // 从工作台跳转过来时直接打开对应弹窗
   useEffect(() => {
-    if (search.get('action') === 'purchase') setModal('purchase');
+    const a = search.get('action');
+    if (a === 'purchase' || a === 'trial') setModal(a);
   }, [search]);
+  useEffect(() => {
+    if (search.get('action') !== 'outcome' || !q.data) return;
+    const t = q.data.trials.find((x) => x.status !== 'scheduled' && x.status !== 'cancelled' && x.outcome !== 'enrolled' && x.outcome !== 'lost');
+    if (t) {
+      setOutcomeTrial(t.id);
+      setModal(t.status === 'no_show' ? 'trial' : 'outcome');
+    }
+  }, [search, q.data]);
 
   const endEnrollment = useMutation({
     mutationFn: (enrollmentId: number) => api(`/api/enrollments/${enrollmentId}/end`, { body: {} }),

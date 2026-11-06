@@ -15,7 +15,7 @@ import {
 } from '@/db/schema';
 import { assertCanModifyStudent, requireRole, type Actor } from '../actor';
 import { DomainError, withDbErrors } from '../errors';
-import { isoWeekday, melbourneDate, melbourneTime, shortTime, timesOverlap } from '@/lib/time';
+import { addDays, isoWeekday, melbourneDate, melbourneDateTime, melbourneTime, shortTime, timesOverlap } from '@/lib/time';
 
 const describeTime = (from: string, to: string) => `${shortTime(from)}-${shortTime(to)}`;
 import { assertMarkWindow, createTaskOnce } from './attendance';
@@ -305,5 +305,52 @@ export async function recordTrialOutcome(
       .where(eq(trialLessons.id, lesson.id))
       .returning();
     return row;
+  });
+}
+
+/** 试听安排（admin）：日期范围内的全部试听时段，含已约学生与状态 */
+export async function listTrialSchedule(db: Db, actor: Actor, opts: { from: string; to: string; subject?: string }) {
+  requireRole(actor, 'admin');
+  if (opts.to < opts.from) throw new DomainError('VALIDATION', '结束日期不能早于开始日期');
+  const fromAt = melbourneDateTime(opts.from, '00:00');
+  const toAt = melbourneDateTime(addDays(opts.to, 1), '00:00');
+  const rows = await db
+    .select({ slot: trialSlots, t: trialTemplates, teacherName: users.name })
+    .from(trialSlots)
+    .innerJoin(trialTemplates, eq(trialTemplates.id, trialSlots.templateId))
+    .innerJoin(users, eq(users.id, trialSlots.teacherId))
+    .where(and(gte(trialSlots.startsAt, fromAt), sql`${trialSlots.startsAt} < ${toAt}`, opts.subject ? eq(trialTemplates.subject, opts.subject) : undefined))
+    .orderBy(trialSlots.startsAt);
+  const ids = rows.map((r) => r.slot.id);
+  const lessons = ids.length
+    ? await db
+        .select({ l: trialLessons, st: students })
+        .from(trialLessons)
+        .innerJoin(students, eq(students.id, trialLessons.studentId))
+        .where(and(inArray(trialLessons.slotId, ids), sql`${trialLessons.status} <> 'cancelled'`))
+    : [];
+  return rows.map(({ slot, t, teacherName }) => {
+    const ls = lessons.filter((x) => x.l.slotId === slot.id);
+    return {
+      id: slot.id,
+      date: melbourneDate(slot.startsAt),
+      startTime: melbourneTime(slot.startsAt),
+      endTime: melbourneTime(slot.endsAt),
+      startsAt: slot.startsAt,
+      subject: t.subject,
+      title: t.title,
+      teacherId: slot.teacherId,
+      teacherName,
+      capacity: slot.capacity,
+      booked: ls.length,
+      students: ls.map(({ l, st }) => ({
+        trialLessonId: l.id,
+        studentId: st.id,
+        name: st.name,
+        status: l.status,
+        outcome: l.outcome,
+        isMine: st.ownerAdminId === actor.id,
+      })),
+    };
   });
 }

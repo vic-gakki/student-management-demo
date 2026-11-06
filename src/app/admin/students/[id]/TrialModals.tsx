@@ -113,7 +113,7 @@ export function BookTrialModal({ student, open, onClose }: { student: StudentDet
   );
 }
 
-function NewSlotForm({ subject, onCreated, onCancel }: { subject: string; onCreated: () => void; onCancel: () => void }) {
+export function NewSlotForm({ subject, onCreated, onCancel }: { subject: string; onCreated: () => void; onCancel: () => void }) {
   const templates = useQuery({ queryKey: ['trial-templates'], queryFn: () => api<{ id: number; subject: string; title: string; durationMin: number }[]>('/api/trial-templates') });
   const teachers = useQuery({ queryKey: ['teachers'], queryFn: () => api<{ id: number; name: string }[]>('/api/teachers') });
   const [teacherId, setTeacherId] = useState('');

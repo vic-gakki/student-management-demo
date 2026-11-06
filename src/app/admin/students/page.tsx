@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Lock, Plus, Search, Users } from 'lucide-react';
@@ -40,7 +40,7 @@ export default function StudentsPage() {
   const [scope, setScope] = useState<'mine' | 'all'>('mine');
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('all');
-  const [showNew, setShowNew] = useState(false);
+  const [showNew, setShowNew] = useState(useSearchParams().get('new') === '1');
   const list = useQuery({
     queryKey: ['students', scope, q, status],
     queryFn: () => api<Row[]>(`/api/students?scope=${scope}&q=${encodeURIComponent(q)}&status=${status === 'all' ? '' : status}`),

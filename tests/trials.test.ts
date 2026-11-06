@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { DbHandle } from '@/db/client';
 import { followUpTasks, lessonLedger, students } from '@/db/schema';
-import { bookTrial, createTrialSlot, markTrialAttendance, recordTrialOutcome } from '@/server/services/trials';
+import { bookTrial, createTrialSlot, listTrialSchedule, markTrialAttendance, recordTrialOutcome } from '@/server/services/trials';
 import { createInquiry } from '@/server/services/students';
 import { getAdminDashboard } from '@/server/services/dashboard';
 import { at, createTestDb, expectCode, makeClass, makeEnrollment, makeSession, makeStudent, makeTemplate, makeUser, TUESDAY } from './helpers';
@@ -159,5 +159,29 @@ describe('工作台', () => {
     const other = await makeUser(h.db, 'admin');
     const d2 = await getAdminDashboard(h.db, other, now);
     expect(d2.lowBalance).toHaveLength(0);
+  });
+});
+
+describe('试听安排', () => {
+  it('列出日期范围内的时段和已约学生，标出是否是自己的学生；老师不能查看', async () => {
+    const admin = await makeUser(h.db, 'admin');
+    const other = await makeUser(h.db, 'admin');
+    const teacher = await makeUser(h.db, 'teacher');
+    const tpl = await makeTemplate(h.db, '物理');
+    const s1 = await createTrialSlot(h.db, admin, { templateId: tpl.id, teacherId: teacher.id, startsAt: at('2026-11-20', '10:00'), capacity: 3 }, now);
+    await createTrialSlot(h.db, admin, { templateId: tpl.id, teacherId: teacher.id, startsAt: at('2026-12-20', '10:00') }, now);
+    const mine = await newLead(admin, '自己的');
+    const theirs = await newLead(other, '别人的');
+    await bookTrial(h.db, admin, { studentId: mine.id, slotId: s1.id }, now);
+    await bookTrial(h.db, other, { studentId: theirs.id, slotId: s1.id }, now);
+
+    const list = await listTrialSchedule(h.db, admin, { from: '2026-11-16', to: '2026-11-29', subject: '物理' });
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ date: '2026-11-20', startTime: '10:00', booked: 2, capacity: 3 });
+    expect(list[0].students.map((s) => [s.name, s.isMine]).sort()).toEqual([
+      ['别人的', false],
+      ['自己的', true],
+    ]);
+    await expectCode(listTrialSchedule(h.db, teacher, { from: '2026-11-16', to: '2026-11-29' }), 'FORBIDDEN');
   });
 });

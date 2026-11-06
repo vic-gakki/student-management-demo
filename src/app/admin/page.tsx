@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlarmClock, BellRing, Check, ChevronRight, CreditCard, Sparkles, UserPlus, Users, Wallet } from 'lucide-react';
+import { AlarmClock, BellRing, CalendarPlus, Check, ChevronRight, CreditCard, Headphones, Plus, Sparkles, UserPlus, Users, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { TASK_TYPE } from '@/lib/labels';
@@ -52,7 +52,26 @@ export default function Workbench() {
 
   return (
     <>
-      <PageHeader title="工作台" description="今天需要处理的学生都在这里" />
+      <PageHeader
+        title="工作台"
+        description="今天需要处理的学生都在这里"
+        actions={
+          <>
+            <Button variant="outline" asChild>
+              <Link href="/admin/trials">
+                <Headphones data-icon="inline-start" />
+                试听安排
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link href="/admin/students?new=1">
+                <Plus data-icon="inline-start" />
+                新建咨询
+              </Link>
+            </Button>
+          </>
+        }
+      />
       {q.isPending ? (
         <LoadingState rows={6} />
       ) : q.isError ? (
@@ -97,12 +116,22 @@ export default function Workbench() {
                             {f.overdue ? '已逾期 · ' : '截止 '}
                             {formatMelbourne(new Date(f.dueAt))}
                           </span>
-                          {f.taskId && (
-                            <Button size="xs" variant="ghost" disabled={done.isPending} onClick={() => done.mutate(f.taskId!)}>
-                              <Check data-icon="inline-start" />
-                              完成
-                            </Button>
-                          )}
+                          <span className="flex gap-1">
+                            {(f.type === 'inquiry_no_trial' || f.type === 'trial_follow_up') && (
+                              <Button size="xs" variant="outline" asChild>
+                                <Link href={`/admin/students/${f.studentId}?action=${f.type === 'inquiry_no_trial' ? 'trial' : 'outcome'}`}>
+                                  {f.type === 'inquiry_no_trial' ? <CalendarPlus data-icon="inline-start" /> : <Headphones data-icon="inline-start" />}
+                                  {f.type === 'inquiry_no_trial' ? '安排试听' : '处理'}
+                                </Link>
+                              </Button>
+                            )}
+                            {f.taskId && (
+                              <Button size="xs" variant="ghost" disabled={done.isPending} onClick={() => done.mutate(f.taskId!)}>
+                                <Check data-icon="inline-start" />
+                                完成
+                              </Button>
+                            )}
+                          </span>
                         </div>
                       </li>
                     ))}
