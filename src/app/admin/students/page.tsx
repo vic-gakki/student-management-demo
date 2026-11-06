@@ -3,12 +3,16 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { Lock, Plus, Search, Users } from 'lucide-react';
+import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
+import { ChevronLeft, ChevronRight, Lock, Plus, Search, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { STUDENT_STATUS, SUBJECT_OPTIONS } from '@/lib/labels';
+import { WEEKDAY_LABELS } from '@/lib/time';
+import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -34,17 +38,38 @@ interface Row {
   remainingHours: number;
   owedHours: number;
   balanceFlag: string;
+  classes: { classId: number; name: string; subject: string; weekday: number; startTime: string }[];
 }
+interface Page {
+  items: Row[];
+  total: number;
+  page: number;
+  pageSize: number;
+  pages: number;
+}
+
+const MAX_CLASS_BADGES = 2;
 
 export default function StudentsPage() {
   const [scope, setScope] = useState<'mine' | 'all'>('mine');
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [showNew, setShowNew] = useState(useSearchParams().get('new') === '1');
   const list = useQuery({
-    queryKey: ['students', scope, q, status],
-    queryFn: () => api<Row[]>(`/api/students?scope=${scope}&q=${encodeURIComponent(q)}&status=${status === 'all' ? '' : status}`),
+    queryKey: ['students', scope, q, status, page, pageSize],
+    queryFn: () =>
+      api<Page>(`/api/students?scope=${scope}&q=${encodeURIComponent(q)}&status=${status === 'all' ? '' : status}&page=${page}&pageSize=${pageSize}`),
+    // 翻页时保留上一页内容，避免表格闪成骨架屏
+    placeholderData: keepPreviousData,
   });
+  // 任何筛选条件变化都回到第一页
+  const filter = <T,>(set: (v: T) => void) => (v: T) => {
+    set(v);
+    setPage(1);
+  };
+  const data = list.data;
 
   return (
     <>
@@ -61,7 +86,7 @@ export default function StudentsPage() {
       <Card>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center gap-3">
-            <Tabs value={scope} onValueChange={(v) => setScope(v as 'mine' | 'all')}>
+            <Tabs value={scope} onValueChange={(v) => filter(setScope)(v as 'mine' | 'all')}>
               <TabsList>
                 <TabsTrigger value="mine">我的</TabsTrigger>
                 <TabsTrigger value="all">全部</TabsTrigger>
@@ -69,9 +94,9 @@ export default function StudentsPage() {
             </Tabs>
             <div className="relative w-full max-w-56">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input className="pl-8" placeholder="搜索姓名" value={q} onChange={(e) => setQ(e.target.value)} />
+              <Input className="pl-8" placeholder="搜索姓名" value={q} onChange={(e) => filter(setQ)(e.target.value)} />
             </div>
-            <Select value={status} onValueChange={setStatus}>
+            <Select value={status} onValueChange={filter(setStatus)}>
               <SelectTrigger className="w-32">
                 <SelectValue />
               </SelectTrigger>
@@ -84,27 +109,29 @@ export default function StudentsPage() {
                 ))}
               </SelectContent>
             </Select>
-            {list.data && <span className="ml-auto text-sm text-muted-foreground">共 {list.data.length} 人</span>}
+            {data && <span className="ml-auto text-sm text-muted-foreground">共 {data.total} 人</span>}
           </div>
 
           {list.isPending ? (
             <LoadingState rows={8} />
-          ) : list.isError ? (
+          ) : list.isError || !data ? (
             <ErrorState error={list.error} onRetry={() => list.refetch()} />
-          ) : list.data.length === 0 ? (
+          ) : data.items.length === 0 ? (
             <EmptyState title="没有符合条件的学生" description="换个筛选条件，或者新建一个咨询" icon={<Users />} />
           ) : (
-            <Table>
+            <>
+            <Table className={cn(list.isPlaceholderData && 'opacity-60')}>
               <TableHeader>
                 <TableRow>
                   <TableHead>学生</TableHead>
                   <TableHead>状态</TableHead>
+                  <TableHead>在读班级</TableHead>
                   <TableHead>课时</TableHead>
                   <TableHead>负责人</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {list.data.map((r) => (
+                {data.items.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell>
                       <Link href={`/admin/students/${r.id}`} className="flex items-center gap-3 hover:text-primary">
@@ -119,6 +146,34 @@ export default function StudentsPage() {
                     </TableCell>
                     <TableCell>
                       <StudentStatusBadge status={r.status} />
+                    </TableCell>
+                    <TableCell>
+                      {r.classes.length === 0 ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        <div className="flex max-w-72 flex-wrap gap-1">
+                          {r.classes.slice(0, MAX_CLASS_BADGES).map((c) => (
+                            <Badge key={c.classId} variant="secondary" className="font-normal">
+                              {c.name} · {WEEKDAY_LABELS[c.weekday]} {c.startTime}
+                            </Badge>
+                          ))}
+                          {r.classes.length > MAX_CLASS_BADGES && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Badge variant="outline" className="font-normal">
+                                  +{r.classes.length - MAX_CLASS_BADGES}
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {r.classes
+                                  .slice(MAX_CLASS_BADGES)
+                                  .map((c) => `${c.name} ${WEEKDAY_LABELS[c.weekday]} ${c.startTime}`)
+                                  .join('、')}
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>
                       {r.status === 'enrolled' || r.status === 'paused' ? (
@@ -137,6 +192,38 @@ export default function StudentsPage() {
                 ))}
               </TableBody>
             </Table>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                每页
+                <Select value={String(pageSize)} onValueChange={(v) => filter(setPageSize)(Number(v))}>
+                  <SelectTrigger size="sm" className="w-20">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[10, 20, 50].map((n) => (
+                      <SelectItem key={n} value={String(n)}>
+                        {n}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                条 · 第 {(data.page - 1) * data.pageSize + 1}–{Math.min(data.page * data.pageSize, data.total)} 条，共 {data.total} 条
+              </div>
+              <div className="flex items-center gap-1">
+                <Button size="sm" variant="outline" disabled={data.page <= 1 || list.isFetching} onClick={() => setPage(data.page - 1)}>
+                  <ChevronLeft data-icon="inline-start" />
+                  上一页
+                </Button>
+                <span className="px-2 tabular-nums">
+                  {data.page} / {data.pages}
+                </span>
+                <Button size="sm" variant="outline" disabled={data.page >= data.pages || list.isFetching} onClick={() => setPage(data.page + 1)}>
+                  下一页
+                  <ChevronRight data-icon="inline-end" />
+                </Button>
+              </div>
+            </div>
+            </>
           )}
         </CardContent>
       </Card>

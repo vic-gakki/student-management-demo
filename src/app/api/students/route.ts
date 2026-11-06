@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { body, route } from '@/server/http';
 import { createInquiry, listStudents } from '@/server/services/students';
 
+/** 学生列表：?scope=mine|all&q=&status=&page=&pageSize= */
 export const GET = route(
   async ({ db, actor, req }) => {
     const sp = req.nextUrl.searchParams;
@@ -9,6 +10,8 @@ export const GET = route(
       scope: sp.get('scope') === 'all' ? 'all' : 'mine',
       q: sp.get('q') || undefined,
       status: sp.get('status') || undefined,
+      page: Number(sp.get('page')) || 1,
+      pageSize: Number(sp.get('pageSize')) || 20,
     });
   },
   { roles: ['admin'] },

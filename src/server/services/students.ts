@@ -24,34 +24,74 @@ import { DomainError } from '../errors';
 import { balanceFlag } from './ledger';
 import { melbourneDate, normTime } from '@/lib/time';
 
-export async function listStudents(db: Db, actor: Actor, opts: { scope: 'mine' | 'all'; q?: string; status?: string }) {
+export const PAGE_SIZES = [10, 20, 50] as const;
+
+export interface StudentListOptions {
+  scope: 'mine' | 'all';
+  q?: string;
+  status?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+/** 学生列表（分页）：每行带上当前在读的班级 */
+export async function listStudents(db: Db, actor: Actor, opts: StudentListOptions, now = new Date()) {
   requireRole(actor, 'admin');
+  const pageSize = PAGE_SIZES.includes(opts.pageSize as never) ? opts.pageSize! : 20;
+  const where = and(
+    opts.scope === 'mine' ? eq(students.ownerAdminId, actor.id) : undefined,
+    // ilike 的通配符由调用方的文字决定，转义 % 和 _，避免"搜索 %"匹配到全部
+    opts.q ? ilike(students.name, `%${opts.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`) : undefined,
+    opts.status ? eq(students.status, opts.status as never) : undefined,
+  );
+  const [cnt] = await db.select({ n: sql<number>`count(*)::int` }).from(students).where(where);
+  const total = cnt?.n ?? 0;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(Math.max(1, Math.floor(opts.page ?? 1)), pages);
+
   const rows = await db
     .select({ st: students, bal: studentBalances, ownerName: users.name })
     .from(students)
     .leftJoin(studentBalances, eq(studentBalances.studentId, students.id))
     .innerJoin(users, eq(users.id, students.ownerAdminId))
-    .where(
-      and(
-        opts.scope === 'mine' ? eq(students.ownerAdminId, actor.id) : undefined,
-        opts.q ? ilike(students.name, `%${opts.q}%`) : undefined,
-        opts.status ? eq(students.status, opts.status as never) : undefined,
-      ),
-    )
-    .orderBy(students.name)
-    .limit(500);
-  return rows.map(({ st, bal, ownerName }) => ({
-    id: st.id,
-    name: st.name,
-    grade: st.grade,
-    status: st.status,
-    ownerAdminId: st.ownerAdminId,
-    ownerName,
-    canEdit: st.ownerAdminId === actor.id,
-    remainingHours: bal?.remainingHours ?? 0,
-    owedHours: bal?.owedHours ?? 0,
-    balanceFlag: balanceFlag(bal?.remainingHours ?? 0, bal?.owedHours ?? 0),
-  }));
+    .where(where)
+    // 加上 id 作为第二排序键，同名学生翻页时顺序稳定
+    .orderBy(students.name, students.id)
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
+
+  const today = melbourneDate(now);
+  const ids = rows.map((r) => r.st.id);
+  const enrolled = ids.length
+    ? await db
+        .select({ studentId: enrollments.studentId, c: classes })
+        .from(enrollments)
+        .innerJoin(classes, eq(classes.id, enrollments.classId))
+        .where(and(inArray(enrollments.studentId, ids), or(isNull(enrollments.endDate), gte(enrollments.endDate, today))))
+        .orderBy(classes.weekday, classes.startTime)
+    : [];
+
+  return {
+    total,
+    page,
+    pageSize,
+    pages,
+    items: rows.map(({ st, bal, ownerName }) => ({
+      id: st.id,
+      name: st.name,
+      grade: st.grade,
+      status: st.status,
+      ownerAdminId: st.ownerAdminId,
+      ownerName,
+      canEdit: st.ownerAdminId === actor.id,
+      remainingHours: bal?.remainingHours ?? 0,
+      owedHours: bal?.owedHours ?? 0,
+      balanceFlag: balanceFlag(bal?.remainingHours ?? 0, bal?.owedHours ?? 0),
+      classes: enrolled
+        .filter((e) => e.studentId === st.id)
+        .map(({ c }) => ({ classId: c.id, name: c.name, subject: c.subject, weekday: c.weekday, startTime: c.startTime.slice(0, 5) })),
+    })),
+  };
 }
 
 export async function getStudentDetail(db: Db, actor: Actor, studentId: number, now = new Date()) {
